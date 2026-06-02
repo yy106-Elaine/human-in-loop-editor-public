@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Noun Ontology Review — O*NET</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f5f3ee;
+    --surface: #faf9f6;
+    --surface2: #efede8;
+    --border: #d8d4cc;
+    --border2: #c8c4bc;
+    --text: #1a1916;
+    --text2: #5a5750;
+    --text3: #8a8780;
+    --accent: #2d4a3e;
+    --accent2: #4a7c6a;
+    --accent-bg: #e8f0ed;
+    --warn: #7a4a1a;
+    --warn-bg: #f5ede0;
+    --err: #6a1f1f;
+    --err-bg: #f5e0e0;
+    --info: #1a3a5a;
+    --info-bg: #e0eaf5;
+    --gold: #8a6a1a;
+    --gold-bg: #f5f0e0;
+    --radius: 6px;
+    --radius-lg: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); background: var(--bg); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* Top bar */
+  .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 20px; height: 52px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+  .topbar-left { display: flex; align-items: center; gap: 16px; }
+  .logo { font-family: 'Instrument Serif', serif; font-size: 18px; color: var(--text); letter-spacing: -0.02em; }
+  .logo span { color: var(--accent2); }
+  .subonto-tabs { display: flex; gap: 2px; }
+  .stab { font-size: 11px; padding: 5px 12px; border-radius: var(--radius); cursor: pointer; color: var(--text2); background: transparent; border: none; font-family: 'DM Sans', sans-serif; transition: all 0.15s; }
+  .stab:hover { background: var(--surface2); color: var(--text); }
+  .stab.active { background: var(--accent); color: #fff; }
+  .topbar-stats { display: flex; gap: 20px; align-items: center; }
+  .stat { font-size: 11px; color: var(--text3); }
+  .stat strong { color: var(--text); font-weight: 500; }
+
+  /* Main layout */
+  .main { display: grid; grid-template-columns: 240px 1fr 260px; flex: 1; overflow: hidden; }
+
+  /* Left panel */
+  .panel-left { background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .panel-header { padding: 10px 12px 8px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+  .panel-title { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); }
+  .search-box { padding: 8px; border-bottom: 1px solid var(--border); }
+  .search-box input { width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); font-size: 12px; font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); outline: none; transition: border-color 0.15s; }
+  .search-box input:focus { border-color: var(--accent2); }
+  .tree-scroll { flex: 1; overflow-y: auto; padding: 6px 4px; }
+  .tree-scroll::-webkit-scrollbar { width: 4px; }
+  .tree-scroll::-webkit-scrollbar-track { background: transparent; }
+  .tree-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .tree-node { display: flex; align-items: center; gap: 3px; padding: 3px 6px; border-radius: var(--radius); cursor: pointer; user-select: none; min-height: 26px; }
+  .tree-node:hover { background: var(--surface2); }
+  .tree-node.active { background: var(--accent-bg); }
+  .tree-node.active .node-label { color: var(--accent); font-weight: 500; }
+  .tree-toggle { width: 14px; text-align: center; font-size: 9px; color: var(--text3); flex-shrink: 0; line-height: 1; }
+  .node-label { font-size: 12px; color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .node-label.virtual { color: var(--text3); font-style: italic; }
+  .flag { font-size: 9px; padding: 1px 4px; border-radius: 3px; flex-shrink: 0; font-weight: 500; }
+  .f-dup { background: var(--err-bg); color: var(--err); }
+  .f-multi { background: var(--info-bg); color: var(--info); }
+  .f-virtual { background: var(--gold-bg); color: var(--gold); }
+  .f-naming { background: var(--warn-bg); color: var(--warn); }
+
+  /* Center panel */
+  .panel-center { display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+  .tab-bar { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); padding: 0 16px; flex-shrink: 0; }
+  .tab { font-size: 12px; padding: 12px 14px; cursor: pointer; color: var(--text2); border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; font-family: 'DM Sans', sans-serif; }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+  .panel-body { flex: 1; overflow-y: auto; padding: 20px; }
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* Node detail */
+  .node-title { font-family: 'Instrument Serif', serif; font-size: 22px; color: var(--text); margin-bottom: 4px; }
+  .node-synset { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text3); margin-bottom: 16px; }
+  .detail-section { margin-bottom: 18px; }
+  .dl { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); margin-bottom: 6px; }
+  .dv { font-size: 13px; color: var(--text); line-height: 1.6; }
+  .path-display { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--text2); background: var(--surface2); padding: 6px 10px; border-radius: var(--radius); }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+  .badge-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+  .badge { font-size: 11px; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); color: var(--text2); cursor: pointer; transition: all 0.1s; }
+  .badge:hover { border-color: var(--accent2); color: var(--accent); background: var(--accent-bg); }
+  .badge.parent { background: var(--accent-bg); color: var(--accent); border-color: var(--accent2); }
+  .badge.child { background: var(--info-bg); color: var(--info); border-color: #90aec8; }
+  .badge.virt { background: var(--gold-bg); color: var(--gold); border-color: #c8aa60; font-style: italic; }
+  .cross-row { display: flex; align-items: flex-start; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text2); }
+  .cross-row:last-child { border-bottom: none; }
+  .cross-rel { font-weight: 500; color: var(--text3); font-size: 11px; min-width: 120px; padding-top: 1px; }
+  .cross-val { color: var(--text); }
+  .empty-center { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 12px; color: var(--text3); }
+  .empty-icon { font-size: 36px; opacity: 0.3; }
+
+  /* Dashboard */
+  .dash-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+  .metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; }
+  .metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text3); margin-bottom: 6px; }
+  .metric-val { font-family: 'Instrument Serif', serif; font-size: 28px; color: var(--text); }
+  .metric-val.red { color: var(--err); }
+  .metric-val.amber { color: var(--gold); }
+  .metric-val.green { color: var(--accent2); }
+  .conf-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px; }
+  .conf-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .conf-row:last-child { margin-bottom: 0; }
+  .conf-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .conf-text { font-size: 12px; color: var(--text2); flex: 1; }
+  .conf-count { font-size: 11px; font-weight: 500; color: var(--text); min-width: 20px; text-align: right; }
+
+  /* Log */
+  .log-entry { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; border-left: 3px solid var(--border); }
+  .log-entry.log-accepted { border-left-color: var(--accent2); }
+  .log-entry.log-rejected { border-left-color: #c05050; }
+  .log-entry.log-escalated { border-left-color: #5090c0; }
+  .log-entry.log-commented { border-left-color: var(--gold); }
+  .log-action { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em; min-width: 70px; padding-top: 1px; }
+  .log-action.accepted { color: var(--accent2); }
+  .log-action.rejected { color: #c05050; }
+  .log-action.escalated { color: #5090c0; }
+  .log-action.commented { color: var(--gold); }
+  .log-detail { flex: 1; font-size: 12px; color: var(--text2); }
+  .log-detail strong { color: var(--text); }
+  .log-time { font-size: 10px; color: var(--text3); font-family: 'DM Mono', monospace; }
+
+  /* Right panel */
+  .panel-right { background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sug-scroll { flex: 1; overflow-y: auto; padding: 8px; }
+  .sug-scroll::-webkit-scrollbar { width: 4px; }
+  .sug-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .sug-card { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 8px; background: var(--surface); transition: opacity 0.2s; }
+  .sug-card.resolved { opacity: 0.45; }
+  .sug-type-label { font-size: 9px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+  .sug-type-label .dot { width: 6px; height: 6px; border-radius: 50%; }
+  .type-dup .dot { background: var(--err); }
+  .type-dup .tl { color: var(--err); }
+  .type-virtual .dot { background: var(--gold); }
+  .type-virtual .tl { color: var(--gold); }
+  .type-multi .dot { background: var(--info); }
+  .type-multi .tl { color: var(--info); }
+  .type-naming .dot { background: var(--warn); }
+  .type-naming .tl { color: var(--warn); }
+  .sug-desc { font-size: 12px; color: var(--text2); line-height: 1.5; margin-bottom: 10px; }
+  .conf-bar-wrap { margin-bottom: 8px; }
+  .conf-bar-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text3); margin-bottom: 4px; }
+  .conf-bar-bg { height: 3px; background: var(--surface2); border-radius: 2px; }
+  .conf-bar-fill { height: 100%; border-radius: 2px; }
+  .fill-high { background: var(--accent2); }
+  .fill-med { background: var(--gold); }
+  .fill-low { background: #c05050; }
+  .action-row { display: flex; gap: 4px; flex-wrap: wrap; }
+  .act-btn { font-size: 11px; padding: 4px 8px; border-radius: var(--radius); border: 1px solid var(--border); background: transparent; cursor: pointer; color: var(--text2); font-family: 'DM Sans', sans-serif; transition: all 0.12s; }
+  .act-btn:hover { background: var(--surface2); }
+  .act-btn.accept { color: var(--accent); border-color: var(--accent2); }
+  .act-btn.accept:hover { background: var(--accent-bg); }
+  .act-btn.reject { color: var(--err); border-color: #d08080; }
+  .act-btn.reject:hover { background: var(--err-bg); }
+  .act-btn.escalate { color: var(--info); border-color: #90aec8; }
+  .act-btn.escalate:hover { background: var(--info-bg); }
+  .resolved-pill { font-size: 10px; padding: 3px 8px; border-radius: 20px; background: var(--surface2); color: var(--text3); display: inline-block; }
+  .empty-state { text-align: center; padding: 40px 16px; color: var(--text3); }
+  .empty-state .ei { font-size: 28px; margin-bottom: 8px; opacity: 0.4; }
+  .empty-state p { font-size: 12px; line-height: 1.5; }
+
+  /* API key setup */
+  .api-bar { background: var(--gold-bg); border-bottom: 1px solid #d4b870; padding: 7px 20px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; font-size: 12px; }
+  .api-bar.connected { background: var(--accent-bg); border-bottom-color: #8ab8a0; }
+  .api-bar label { color: var(--text2); white-space: nowrap; font-weight: 500; }
+  .api-bar input { flex: 1; max-width: 340px; padding: 4px 9px; border: 1px solid var(--border2); border-radius: var(--radius); font-size: 12px; font-family: 'DM Mono', monospace; background: var(--surface); color: var(--text); outline: none; }
+  .api-bar input:focus { border-color: var(--accent2); }
+  .api-bar-btn { font-size: 11px; padding: 4px 12px; border-radius: var(--radius); border: 1px solid var(--border2); background: var(--surface); cursor: pointer; color: var(--text); font-family: 'DM Sans', sans-serif; transition: all 0.12s; }
+  .api-bar-btn:hover { background: var(--surface2); }
+  .api-status { font-size: 11px; color: var(--text3); }
+  .api-status.ok { color: var(--accent2); font-weight: 500; }
+
+  /* AI loading state */
+  .ai-loading { display: flex; flex-direction: column; gap: 8px; padding: 12px; }
+  .ai-loading-label { font-size: 11px; color: var(--text3); display: flex; align-items: center; gap: 6px; }
+  .spinner { width: 12px; height: 12px; border: 1.5px solid var(--border2); border-top-color: var(--accent2); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ai-thinking { font-size: 11px; color: var(--text3); font-style: italic; padding: 6px 0; }
+
+  /* Live AI badge */
+  .live-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--accent-bg); color: var(--accent); font-weight: 500; border: 1px solid var(--accent2); }
+  .static-badge { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: var(--gold-bg); color: var(--gold); font-weight: 500; border: 1px solid #c8aa60; }
+
+  /* AI-generated suggestion style */
+  .sug-card.ai-generated { border-color: var(--accent2); }
+  .sug-card.ai-generated .sug-type-label::after { content: 'AI'; font-size: 8px; padding: 1px 4px; background: var(--accent-bg); color: var(--accent); border-radius: 3px; margin-left: auto; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="logo">Ontology<span>Review</span></div>
+    <div class="subonto-tabs">
+      <button class="stab active" onclick="switchSubonto('physical',this)">Physical</button>
+      <button class="stab" onclick="switchSubonto('info',this)">Info</button>
+      <button class="stab" onclick="switchSubonto('actor',this)">Actor</button>
+      <button class="stab" onclick="switchSubonto('activities',this)">Activities</button>
+    </div>
+  </div>
+  <div class="topbar-stats">
+    <div class="stat">Nodes: <strong id="stat-nodes">—</strong></div>
+    <div class="stat">Flagged: <strong id="stat-flagged">—</strong></div>
+    <div class="stat">Reviewed: <strong id="stat-reviewed">0</strong></div>
+  </div>
+</div>
+
+<!-- API key bar -->
+<div class="api-bar" id="api-bar">
+  <label>Anthropic API key</label>
+  <input type="password" id="api-key-input" placeholder="sk-ant-…  (stays in your browser, never sent anywhere except Anthropic)" />
+  <button class="api-bar-btn" onclick="saveApiKey()">Connect</button>
+  <span class="api-status" id="api-status">Not connected — using pre-written suggestions</span>
+</div>
+
+<div class="main">
+  <!-- Left: Tree Navigation -->
+  <div class="panel-left">
+    <div class="panel-header">
+      <span class="panel-title">Navigation</span>
+    </div>
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="Search nodes…" oninput="filterTree(this.value)">
+    </div>
+    <div class="tree-scroll" id="tree-container"></div>
+  </div>
+
+  <!-- Center: Detail / Log / Dashboard -->
+  <div class="panel-center">
+    <div class="tab-bar">
+      <div class="tab active" onclick="switchTab('detail',this)">Node detail</div>
+      <div class="tab" onclick="switchTab('log',this)">Review log</div>
+      <div class="tab" onclick="switchTab('dashboard',this)">Dashboard</div>
+    </div>
+    <div class="panel-body" id="tab-detail">
+      <div class="empty-center">
+        <div class="empty-icon">⬡</div>
+        <p style="font-size:13px">Select a node to view details</p>
+      </div>
+    </div>
+    <div class="panel-body" id="tab-log" style="display:none">
+      <div class="empty-state"><div class="ei">📋</div><p>No decisions logged yet.<br>Start reviewing nodes to build the log.</p></div>
+    </div>
+    <div class="panel-body" id="tab-dashboard" style="display:none">
+      <div class="dash-grid">
+        <div class="metric"><div class="metric-label">Total nodes</div><div class="metric-val" id="d-total">—</div></div>
+        <div class="metric"><div class="metric-label">Virtual nodes</div><div class="metric-val amber" id="d-virtual">—</div></div>
+        <div class="metric"><div class="metric-label">Flagged</div><div class="metric-val red" id="d-flagged">—</div></div>
+        <div class="metric"><div class="metric-label">Duplicates</div><div class="metric-val red" id="d-dup">—</div></div>
+        <div class="metric"><div class="metric-label">Multi-inherit</div><div class="metric-val amber" id="d-multi">—</div></div>
+        <div class="metric"><div class="metric-label">Resolved</div><div class="metric-val green" id="d-resolved">0</div></div>
+      </div>
+      <div class="conf-section">
+        <div class="dl" style="margin-bottom:12px">Confidence routing</div>
+        <div class="conf-row"><div class="conf-dot" style="background:var(--accent2)"></div><div class="conf-text">High (&gt;80%) — auto-apply, spot-check</div><div class="conf-count" id="cd-high">—</div></div>
+        <div class="conf-row"><div class="conf-dot" style="background:var(--gold)"></div><div class="conf-text">Medium (55–80%) — standard review</div><div class="conf-count" id="cd-med">—</div></div>
+        <div class="conf-row"><div class="conf-dot" style="background:#c05050"></div><div class="conf-text">Low (&lt;55%) — escalate to expert</div><div class="conf-count" id="cd-low">—</div></div>
+      </div>
+      <div class="conf-section">
+        <div class="dl" style="margin-bottom:12px">Edit type breakdown</div>
+        <div id="type-breakdown"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: AI Suggestions -->
+  <div class="panel-right">
+    <div class="panel-header">
+      <span class="panel-title">AI Suggestions</span>
+      <span id="ai-mode-badge" class="static-badge">static</span>
+    </div>
+    <div class="sug-scroll" id="suggestions-panel">
+      <div class="empty-state"><div class="ei">🤖</div><p>Select a node<br>to see AI suggestions</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// ONTOLOGY DATA — built from the 4 subontologies
+// ─────────────────────────────────────────────
+const SUBONTOS = {
+
+physical: [
+  {id:'artifact',label:'Artifact',synset:'artifact.n.01',def:'A man-made object.',path:'Artifact',parents:[],virtual:false,flags:[],cross:[]},
+  // Infrastructure
+  {id:'infrastructure',label:'infrastructure',synset:'infrastructure.n.01',def:'The basic structure or features of a system or organization.',path:'Artifact → infrastructure',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'opening',label:'opening',synset:'opening.n.10',def:'A vacant or unobstructed space that is man-made.',path:'Artifact → infrastructure → opening',parents:['infrastructure'],virtual:false,flags:[],cross:[]},
+  {id:'hole',label:'hole',synset:'hole.n.02',def:'An opening deliberately made in or through something.',path:'Artifact → infrastructure → opening → hole',parents:['opening'],virtual:false,flags:[],cross:[]},
+  {id:'buttonhole',label:'buttonhole',synset:'buttonhole.n.01',def:'A hole through which a button is passed.',path:'Artifact → infrastructure → opening → hole → buttonhole',parents:['hole'],virtual:false,flags:[],cross:[]},
+  {id:'window-phys',label:'window (frame)',synset:'window.n.01',def:'A framework of wood or metal that contains a pane of glass.',path:'Artifact → infrastructure → opening → window',parents:['opening'],virtual:false,flags:['dup'],cross:[{rel:'duplicate sense',val:'window.n.02 (Info: GUI element) — same label, different ontologies'}]},
+  {id:'window-opening',label:'window (opening)',synset:'window.n.02',def:'A transparent panel in a wall that admits light.',path:'Artifact → infrastructure → opening → window',parents:['opening'],virtual:false,flags:['dup'],cross:[{rel:'duplicate sense',val:'window.n.01 (Physical: frame structure)'}]},
+  // Structure
+  {id:'structure',label:'structure',synset:'structure.n.01',def:'A thing constructed; a complex entity constructed of many parts.',path:'Artifact → structure',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'area',label:'area (space)',synset:'area.n.05',def:'A part of a structure having some specific characteristic or function.',path:'Artifact → structure → area',parents:['structure'],virtual:false,flags:[],cross:[]},
+  {id:'room',label:'room',synset:'room.n.01',def:'An area within a building enclosed by walls and floor and ceiling.',path:'Artifact → structure → area → room',parents:['area'],virtual:false,flags:[],cross:[]},
+  {id:'kitchen',label:'kitchen',synset:'kitchen.n.01',def:'A room equipped for preparing meals.',path:'Artifact → structure → area → room → kitchen',parents:['room'],virtual:false,flags:[],cross:[]},
+  {id:'classroom',label:'classroom',synset:'classroom.n.01',def:'A room in a school where lessons take place.',path:'Artifact → structure → area → room → classroom',parents:['room'],virtual:false,flags:[],cross:[]},
+  {id:'building',label:'building',synset:'building.n.01',def:'A structure with a roof and walls standing more or less permanently in one place.',path:'Artifact → structure → building',parents:['structure'],virtual:false,flags:[],cross:[]},
+  {id:'school-phys',label:'school (building)',synset:'school.n.02',def:'A building where young persons receive education.',path:'Artifact → structure → building → school',parents:['building'],virtual:false,flags:['multi'],cross:[{rel:'also classified as',val:'Actor → organization → school.n.01 (institution)'},{rel:'note',val:'physical building vs. educational institution — classic multiple-inheritance case'}]},
+  {id:'library',label:'library',synset:'library.n.05',def:'A building that houses a collection of books and other materials.',path:'Artifact → structure → building → library',parents:['building'],virtual:false,flags:[],cross:[]},
+  {id:'factory',label:'factory',synset:'factory.n.01',def:'A building or set of buildings where goods are manufactured.',path:'Artifact → structure → building → factory',parents:['building'],virtual:false,flags:[],cross:[]},
+  {id:'office',label:'office',synset:'office.n.01',def:'A room or set of rooms used as a place for commercial, professional, or bureaucratic work.',path:'Artifact → structure → building → office',parents:['building'],virtual:false,flags:[],cross:[]},
+  // Barrier
+  {id:'barrier-struct',label:'barrier',synset:'barrier.n.01',def:'A structure or object that blocks or is intended to block passage.',path:'Artifact → structure → barrier',parents:['structure'],virtual:false,flags:[],cross:[]},
+  {id:'door',label:'door',synset:'door.n.01',def:'A swinging or sliding barrier that will close the entrance to a room or building.',path:'Artifact → structure → barrier → door',parents:['barrier-struct'],virtual:false,flags:[],cross:[]},
+  {id:'fence',label:'fence',synset:'fence.n.01',def:'A barrier that serves to enclose an area.',path:'Artifact → structure → barrier → fence',parents:['barrier-struct'],virtual:false,flags:[],cross:[]},
+  {id:'dam',label:'dam',synset:'dam.n.01',def:'A barrier constructed to hold back water.',path:'Artifact → structure → barrier → dam',parents:['barrier-struct'],virtual:false,flags:[],cross:[]},
+  // Part (artifact)
+  {id:'part-artifact',label:'part (artifact)',synset:'part.n.02',def:'Something that is an element of a larger whole.',path:'Artifact → part',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'component',label:'component',synset:'component.n.03',def:'An artifact that is part of a larger construction.',path:'Artifact → part → component',parents:['part-artifact'],virtual:false,flags:[],cross:[]},
+  {id:'hardware',label:'hardware',synset:'hardware.n.03',def:'Instrumentalities, including machines and tools, for manufacturing.',path:'Artifact → part → hardware',parents:['part-artifact'],virtual:false,flags:[],cross:[]},
+  {id:'ingredient',label:'ingredient',synset:'ingredient.n.01',def:'A component of a mixture or compound.',path:'Artifact → part → ingredient',parents:['part-artifact'],virtual:false,flags:[],cross:[]},
+  // Object
+  {id:'object',label:'object',synset:'object.n.01',def:'A tangible and visible entity; an entity that can cast a shadow.',path:'Artifact → object',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'representation',label:'representation',synset:'representation.n.02',def:'A creation that is a visual or tangible rendering of someone or something.',path:'Artifact → object → representation',parents:['object'],virtual:false,flags:[],cross:[]},
+  {id:'photograph',label:'photograph',synset:'photograph.n.01',def:'A picture created by light falling on a light-sensitive surface.',path:'Artifact → object → representation → photograph',parents:['representation'],virtual:false,flags:[],cross:[]},
+  {id:'diagram',label:'diagram',synset:'diagram.n.01',def:'A drawing intended to explain how something works.',path:'Artifact → object → representation → diagram',parents:['representation'],virtual:false,flags:[],cross:[]},
+  {id:'map',label:'map',synset:'map.n.01',def:'A diagrammatic representation of the earth\'s surface or part of it.',path:'Artifact → object → representation → map',parents:['representation'],virtual:false,flags:[],cross:[]},
+  {id:'document-phys',label:'document',synset:'document.n.02',def:'A written or printed work consisting of pages.',path:'Artifact → object → document',parents:['object'],virtual:false,flags:[],cross:[]},
+  {id:'product-phys',label:'product',synset:'product.n.02',def:'An artifact that has been created by someone or some process.',path:'Artifact → object → product',parents:['object'],virtual:false,flags:['naming'],cross:[{rel:'naming note',val:'In a workplace context, "product" spans physical goods, software, marketing deliverables, and slides. Consider renaming to "physical product / output" or splitting.'}]},
+  {id:'publication',label:'publication',synset:'publication.n.01',def:'A copy of a printed work offered for distribution.',path:'Artifact → object → publication',parents:['object'],virtual:false,flags:[],cross:[]},
+  {id:'book',label:'book',synset:'book.n.01',def:'A written work or composition.',path:'Artifact → object → publication → book',parents:['publication'],virtual:false,flags:[],cross:[]},
+  {id:'periodical',label:'periodical',synset:'periodical.n.01',def:'A publication issued at regular intervals.',path:'Artifact → object → publication → periodical',parents:['publication'],virtual:false,flags:[],cross:[]},
+  // Clothing
+  {id:'clothing',label:'clothing',synset:'clothing.n.01',def:'A covering designed to be worn on a person\'s body.',path:'Artifact → clothing',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'garment',label:'garment',synset:'garment.n.01',def:'An article of clothing.',path:'Artifact → clothing → garment',parents:['clothing'],virtual:false,flags:[],cross:[]},
+  {id:'overgarment-v',label:'overgarment',synset:'overgarment.n.01',def:'A garment worn over other garments.',path:'Artifact → clothing → overgarment',parents:['clothing'],virtual:true,flags:['virtual'],cross:[{rel:'suggestion',val:'Single-child virtual node — only child is "coat". Consider collapsing: connect coat directly to clothing.'}]},
+  {id:'coat-v',label:'coat',synset:'coat.n.01',def:'An outer garment that has sleeves and covers the body from shoulder down.',path:'Artifact → clothing → overgarment → coat',parents:['overgarment-v'],virtual:true,flags:['virtual','multi'],cross:[{rel:'virtual parent issue',val:'coat is also virtual here but has real children (jacket)'},{rel:'multi-inherit candidate',val:'coat may belong under both clothing and protective clothing'}]},
+  {id:'jacket',label:'jacket',synset:'jacket.n.01',def:'A short coat.',path:'Artifact → clothing → overgarment → coat → jacket',parents:['coat-v'],virtual:false,flags:[],cross:[]},
+  {id:'uniform',label:'uniform',synset:'uniform.n.01',def:'Clothing of distinctive design worn by members of a particular group.',path:'Artifact → clothing → uniform',parents:['clothing'],virtual:false,flags:[],cross:[]},
+  {id:'footwear',label:'footwear',synset:'footwear.n.01',def:'Covering for a person\'s feet.',path:'Artifact → clothing → footwear',parents:['clothing'],virtual:false,flags:[],cross:[]},
+  // Instrumentality / System
+  {id:'instrumentality',label:'instrumentality',synset:'instrumentality.n.03',def:'An artifact (or system of artifacts) that is instrumental in accomplishing some end.',path:'Artifact → instrumentality',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'system-mech',label:'system (mechanical)',synset:'system.n.01',def:'A group of independent but interrelated elements comprising a unified whole.',path:'Artifact → instrumentality → system',parents:['instrumentality'],virtual:false,flags:[],cross:[]},
+  {id:'device',label:'device',synset:'device.n.01',def:'An instrumentality invented for a particular purpose.',path:'Artifact → instrumentality → device',parents:['instrumentality'],virtual:false,flags:[],cross:[]},
+  {id:'machine',label:'machine',synset:'machine.n.01',def:'Any mechanical or electrical device that transmits or modifies energy.',path:'Artifact → instrumentality → device → machine',parents:['device'],virtual:false,flags:[],cross:[]},
+  {id:'computer',label:'computer',synset:'computer.n.01',def:'A machine for performing calculations automatically.',path:'Artifact → instrumentality → device → machine → computer',parents:['machine'],virtual:false,flags:[],cross:[]},
+  {id:'software-phys',label:'software',synset:'software.n.01',def:'Written programs or procedures that tell a computer what to do.',path:'Artifact → instrumentality → device → software',parents:['device'],virtual:false,flags:['multi'],cross:[{rel:'multiple inheritance',val:'software functions as both a digital Artifact and an Info/communication entity'},{rel:'also in',val:'Info Subontology → Communication → coding_system → software.n.01'}]},
+  {id:'instrument',label:'instrument',synset:'instrument.n.01',def:'A device that requires skill for proper use.',path:'Artifact → instrumentality → instrument',parents:['instrumentality'],virtual:false,flags:[],cross:[]},
+  {id:'tool',label:'tool',synset:'tool.n.01',def:'An implement used in the practice of a vocation.',path:'Artifact → instrumentality → tool',parents:['instrumentality'],virtual:false,flags:[],cross:[]},
+  {id:'vehicle',label:'vehicle',synset:'vehicle.n.01',def:'A conveyance that transports people or objects.',path:'Artifact → instrumentality → vehicle',parents:['instrumentality'],virtual:false,flags:[],cross:[]},
+  {id:'aircraft',label:'aircraft',synset:'aircraft.n.01',def:'A vehicle that can fly.',path:'Artifact → instrumentality → vehicle → aircraft',parents:['vehicle'],virtual:false,flags:[],cross:[]},
+  {id:'automobile',label:'car / automobile',synset:'car.n.01',def:'A motor vehicle with four wheels.',path:'Artifact → instrumentality → vehicle → car',parents:['vehicle'],virtual:false,flags:[],cross:[]},
+  {id:'truck',label:'truck',synset:'truck.n.01',def:'An automotive vehicle suitable for hauling.',path:'Artifact → instrumentality → vehicle → truck',parents:['vehicle'],virtual:false,flags:[],cross:[]},
+  {id:'train',label:'train',synset:'train.n.01',def:'Public transport consisting of a line of railroad cars.',path:'Artifact → instrumentality → vehicle → train',parents:['vehicle'],virtual:false,flags:[],cross:[]},
+  {id:'railway-v',label:'railway',synset:'railway.n.01',def:'A line that is the commercial organization responsible for operating a system of railways.',path:'Artifact → instrumentality → vehicle → railway',parents:['vehicle'],virtual:true,flags:['virtual'],cross:[{rel:'note',val:'Virtual node not from O*NET tasks. Utility unclear — consider removing. "railway" as organization belongs in Actor subontology.'}]},
+  // Container
+  {id:'container',label:'container',synset:'container.n.01',def:'Any object that can be used to hold things.',path:'Artifact → container',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'vessel-cont',label:'vessel',synset:'vessel.n.03',def:'An object used as a container especially for liquids.',path:'Artifact → container → vessel',parents:['container'],virtual:false,flags:[],cross:[]},
+  {id:'box',label:'box',synset:'box.n.01',def:'A (usually rectangular) container; may have a lid.',path:'Artifact → container → box',parents:['container'],virtual:false,flags:[],cross:[]},
+  {id:'bag',label:'bag',synset:'bag.n.01',def:'A flexible container with a single opening.',path:'Artifact → container → bag',parents:['container'],virtual:false,flags:[],cross:[]},
+  // Furniture
+  {id:'furnishing',label:'furnishing',synset:'furnishing.n.02',def:'The instrumentalities that make a home livable.',path:'Artifact → furnishing',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'furniture',label:'furniture',synset:'furniture.n.01',def:'Furnishings that make a room or other area ready for occupancy.',path:'Artifact → furnishing → furniture',parents:['furnishing'],virtual:false,flags:[],cross:[]},
+  {id:'table',label:'table',synset:'table.n.03',def:'A piece of furniture with tableware for a meal.',path:'Artifact → furnishing → furniture → table',parents:['furniture'],virtual:false,flags:[],cross:[]},
+  {id:'chair',label:'chair',synset:'chair.n.01',def:'A seat for one person with a support for the back.',path:'Artifact → furnishing → furniture → chair',parents:['furniture'],virtual:false,flags:[],cross:[]},
+  // Material / Matter
+  {id:'matter',label:'matter',synset:'matter.n.03',def:'That which has mass and occupies space.',path:'Artifact → matter',parents:['artifact'],virtual:false,flags:[],cross:[]},
+  {id:'fabric',label:'fabric',synset:'fabric.n.01',def:'Artifact made by weaving or felting or knitting or crocheting natural or synthetic fibers.',path:'Artifact → matter → fabric',parents:['matter'],virtual:false,flags:[],cross:[]},
+  {id:'substance',label:'substance',synset:'substance.n.07',def:'A particular kind or species of matter with uniform properties.',path:'Artifact → matter → substance',parents:['matter'],virtual:false,flags:[],cross:[]},
+  {id:'drug',label:'drug',synset:'drug.n.01',def:'A substance used as a medication or in the preparation of medication.',path:'Artifact → matter → substance → drug',parents:['substance'],virtual:false,flags:[],cross:[]},
+  {id:'food',label:'food',synset:'food.n.01',def:'Any nutritious substance that people eat or drink.',path:'Artifact → matter → substance → food',parents:['substance'],virtual:false,flags:[],cross:[]},
+  {id:'fuel',label:'fuel',synset:'fuel.n.01',def:'A substance that can be consumed to produce energy.',path:'Artifact → matter → substance → fuel',parents:['substance'],virtual:false,flags:[],cross:[]},
+  // Natural Entities
+  {id:'nat-obj',label:'natural object',synset:'natural_object.n.01',def:'An object occurring naturally; not made by man.',path:'Natural entity → natural object',parents:[],virtual:true,flags:[],cross:[]},
+  {id:'living-thing',label:'living thing',synset:'living_thing.n.01',def:'A living (or once living) entity.',path:'Natural entity → living thing',parents:['nat-obj'],virtual:true,flags:[],cross:[]},
+  {id:'animal',label:'animal',synset:'animal.n.01',def:'A living organism characterized by voluntary movement.',path:'Natural entity → living thing → animal',parents:['living-thing'],virtual:false,flags:['multi'],cross:[{rel:'multiple inheritance',val:'animal has agency → belongs in Actor subontology too'},{rel:'note',val:'context-dependent: a livestock animal is a physical object; a trained dog may be an Actor'}]},
+  {id:'plant',label:'plant',synset:'plant.n.02',def:'A living organism lacking the power of locomotion.',path:'Natural entity → living thing → plant',parents:['living-thing'],virtual:false,flags:[],cross:[]},
+  {id:'body-part',label:'body part',synset:'body_part.n.01',def:'Any part of an organism such as an organ or extremity.',path:'Natural entity → body part',parents:['nat-obj'],virtual:false,flags:[],cross:[]},
+  {id:'organ',label:'organ',synset:'organ.n.01',def:'A fully differentiated structural and functional unit in an animal.',path:'Natural entity → body part → organ',parents:['body-part'],virtual:false,flags:[],cross:[]},
+  {id:'bone',label:'bone',synset:'bone.n.01',def:'Rigid connective tissue that makes up the skeleton of vertebrates.',path:'Natural entity → body part → bone',parents:['body-part'],virtual:false,flags:[],cross:[]},
+],
+
+info: [
+  {id:'communication',label:'Communication',synset:'communication.n.01',def:'The activity of conveying information.',path:'Communication',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'written-comm',label:'written communication',synset:'written_communication.n.01',def:'Communication by means of written symbols.',path:'Communication → written communication',parents:['communication'],virtual:true,flags:[],cross:[]},
+  {id:'coding-system',label:'coding system',synset:'coding_system.n.01',def:'A system of signals used to represent letters or numbers.',path:'Communication → written communication → coding system',parents:['written-comm'],virtual:true,flags:[],cross:[]},
+  {id:'code-info',label:'code (program)',synset:'code.n.03',def:'A set of instructions for a computer.',path:'Communication → written communication → coding system → code',parents:['coding-system'],virtual:false,flags:['dup'],cross:[{rel:'duplicate label',val:'code.n.01 (cipher system) appears in same ontology — same label, very different meanings'},{rel:'resolution',val:'rename to "source code" or "programming code" to disambiguate'}]},
+  {id:'software-info',label:'software',synset:'software.n.01',def:'Written programs or procedures or rules and associated documentation.',path:'Communication → written communication → coding system → software',parents:['coding-system'],virtual:false,flags:['multi'],cross:[{rel:'multiple inheritance',val:'also classified under Physical → Artifact → instrumentality → device'}]},
+  {id:'program',label:'program',synset:'program.n.07',def:'A sequence of instructions that a computer can interpret and execute.',path:'Communication → written communication → coding system → program',parents:['coding-system'],virtual:false,flags:[],cross:[]},
+  {id:'code-cipher',label:'code (cipher)',synset:'code.n.01',def:'A coding system used for transmitting messages requiring brevity or secrecy.',path:'Communication → written communication → code (cipher)',parents:['written-comm'],virtual:false,flags:['dup'],cross:[{rel:'duplicate label',val:'code.n.03 (programming instructions) — same label, different meanings'},{rel:'resolution',val:'rename to "cipher code" or keep separate under distinct parents'}]},
+  {id:'record',label:'record',synset:'record.n.07',def:'A document that can serve as legal evidence of a transaction.',path:'Communication → written communication → record',parents:['written-comm'],virtual:false,flags:[],cross:[]},
+  {id:'note',label:'note',synset:'note.n.01',def:'A brief written record.',path:'Communication → written communication → record → note',parents:['record'],virtual:false,flags:[],cross:[]},
+  {id:'memo',label:'memo',synset:'memo.n.01',def:'A written proposal or reminder.',path:'Communication → written communication → record → memo',parents:['record'],virtual:false,flags:[],cross:[]},
+  {id:'transcript',label:'transcript',synset:'transcript.n.02',def:'Something that has been transcribed; a written record.',path:'Communication → written communication → record → transcript',parents:['record'],virtual:false,flags:[],cross:[]},
+  {id:'correspondence',label:'correspondence',synset:'correspondence.n.01',def:'Communication by the exchange of letters.',path:'Communication → written communication → correspondence',parents:['written-comm'],virtual:false,flags:[],cross:[]},
+  {id:'auditory-comm',label:'auditory communication',synset:'auditory_communication.n.01',def:'Communication that relies on hearing.',path:'Communication → auditory communication',parents:['communication'],virtual:true,flags:[],cross:[]},
+  {id:'speech',label:'speech',synset:'speech.n.02',def:'The exchange of spoken words.',path:'Communication → auditory communication → speech',parents:['auditory-comm'],virtual:true,flags:[],cross:[]},
+  {id:'discussion',label:'discussion',synset:'discussion.n.02',def:'An extended communication dealing with some particular topic.',path:'Communication → auditory communication → speech → discussion',parents:['speech'],virtual:false,flags:[],cross:[]},
+  {id:'music',label:'music',synset:'music.n.01',def:'An artistic form of auditory communication incorporating instrumental or vocal tones.',path:'Communication → auditory communication → music',parents:['auditory-comm'],virtual:false,flags:[],cross:[]},
+  {id:'visual-comm',label:'visual communication',synset:'visual_communication.n.01',def:'Communication that relies on seeing.',path:'Communication → visual communication',parents:['communication'],virtual:true,flags:[],cross:[]},
+  {id:'chart-info',label:'chart',synset:'chart.n.01',def:'A visual display of information.',path:'Communication → visual communication → chart',parents:['visual-comm'],virtual:false,flags:[],cross:[]},
+  {id:'presentation',label:'presentation',synset:'presentation.n.03',def:'A visual display of information as a series of slides.',path:'Communication → visual communication → presentation',parents:['visual-comm'],virtual:false,flags:[],cross:[]},
+  {id:'signal',label:'signal',synset:'signal.n.01',def:'Any nonverbal action or gesture that encodes a message.',path:'Communication → visual communication → signal',parents:['visual-comm'],virtual:false,flags:[],cross:[]},
+  {id:'symbol',label:'symbol',synset:'symbol.n.01',def:'An arbitrary sign used to represent something.',path:'Communication → visual communication → symbol',parents:['visual-comm'],virtual:false,flags:[],cross:[]},
+  {id:'label-info',label:'label',synset:'label.n.04',def:'A brief description given for purposes of identification.',path:'Communication → visual communication → label',parents:['visual-comm'],virtual:false,flags:[],cross:[]},
+  // Record types
+  {id:'record-type',label:'record (type)',synset:'record.n.01',def:'A document that can serve as legal evidence of a transaction.',path:'Communication → record',parents:['communication'],virtual:true,flags:[],cross:[]},
+  {id:'history',label:'history',synset:'history.n.02',def:'A record or narrative description of past events.',path:'Communication → record → history',parents:['record-type'],virtual:false,flags:[],cross:[]},
+  {id:'file',label:'file',synset:'file.n.01',def:'A set of related records kept together.',path:'Communication → record → file',parents:['record-type'],virtual:false,flags:[],cross:[]},
+  {id:'log',label:'log',synset:'log.n.03',def:'A written record of events on a voyage.',path:'Communication → record → log',parents:['record-type'],virtual:false,flags:[],cross:[]},
+  // Attribute / cognition
+  {id:'attribute',label:'Attribute',synset:'attribute.n.02',def:'An abstraction belonging to or characteristic of an entity.',path:'Attribute',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'cognition',label:'cognition',synset:'cognition.n.01',def:'The psychological result of perception and learning and reasoning.',path:'Attribute → cognition',parents:['attribute'],virtual:false,flags:[],cross:[]},
+  {id:'information-cog',label:'information',synset:'information.n.02',def:'Knowledge acquired through experience or study.',path:'Attribute → cognition → information',parents:['cognition'],virtual:false,flags:[],cross:[]},
+  {id:'plan-cog',label:'plan',synset:'plan.n.01',def:'A series of steps to be carried out or goals to be accomplished.',path:'Attribute → cognition → plan',parents:['cognition'],virtual:false,flags:[],cross:[]},
+  {id:'concept',label:'concept',synset:'concept.n.01',def:'An abstract or general idea inferred or derived from specific instances.',path:'Attribute → cognition → concept',parents:['cognition'],virtual:false,flags:[],cross:[]},
+  {id:'method',label:'method',synset:'method.n.01',def:'A way of doing something, especially a systematic way.',path:'Attribute → cognition → method',parents:['cognition'],virtual:false,flags:[],cross:[]},
+  {id:'policy',label:'policy',synset:'policy.n.01',def:'A plan of action adopted by an individual or social group.',path:'Attribute → cognition → policy',parents:['cognition'],virtual:false,flags:[],cross:[]},
+  {id:'rule',label:'rule',synset:'rule.n.01',def:'A prescribed guide for conduct or action.',path:'Attribute → cognition → rule',parents:['cognition'],virtual:false,flags:[],cross:[]},
+  // Location
+  {id:'location',label:'Location',synset:'location.n.01',def:'A point or extent in space.',path:'Location',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'region',label:'region',synset:'region.n.03',def:'A large indefinite location on the surface of the Earth.',path:'Location → region',parents:['location'],virtual:true,flags:[],cross:[]},
+  {id:'site',label:'site',synset:'site.n.01',def:'The piece of land on which something is located.',path:'Location → region → site',parents:['region'],virtual:false,flags:[],cross:[]},
+  {id:'workplace',label:'workplace',synset:'workplace.n.01',def:'A place where work is done.',path:'Location → workplace',parents:['location'],virtual:false,flags:[],cross:[]},
+  {id:'field-loc',label:'field',synset:'field.n.01',def:'A piece of land cleared of trees and usually enclosed.',path:'Location → field',parents:['location'],virtual:false,flags:[],cross:[]},
+],
+
+actor: [
+  {id:'human',label:'Human',synset:'—',def:'A human actor (individual or group).',path:'Actor → Human',parents:[],virtual:false,flags:[],cross:[]},
+  // Groups
+  {id:'group',label:'group',synset:'group.n.01',def:'Any number of entities considered as a unit.',path:'Actor → Human → group',parents:['human'],virtual:false,flags:[],cross:[]},
+  {id:'organization',label:'organization',synset:'organization.n.01',def:'A group of people who work together.',path:'Actor → Human → group → organization',parents:['group'],virtual:false,flags:[],cross:[]},
+  {id:'department',label:'department',synset:'department.n.01',def:'A specialized division of a large organization.',path:'Actor → Human → group → organization → department',parents:['organization'],virtual:false,flags:[],cross:[]},
+  {id:'agency',label:'agency',synset:'agency.n.01',def:'A business that serves other businesses.',path:'Actor → Human → group → organization → agency',parents:['organization'],virtual:false,flags:[],cross:[]},
+  {id:'team',label:'team',synset:'team.n.01',def:'A cooperative unit.',path:'Actor → Human → group → organization → team',parents:['organization'],virtual:false,flags:[],cross:[]},
+  {id:'institution',label:'institution',synset:'institution.n.01',def:'An organization founded for a religious, educational, or social purpose.',path:'Actor → Human → group → organization → institution',parents:['organization'],virtual:false,flags:[],cross:[]},
+  {id:'school-actor',label:'school (institution)',synset:'school.n.01',def:'An educational institution.',path:'Actor → Human → group → organization → institution → school',parents:['institution'],virtual:false,flags:['multi'],cross:[{rel:'multiple inheritance',val:'school is also a physical building — see Physical → structure → building → school.n.02'},{rel:'note',val:'institution (Actor) vs. building (Physical) — decide which is primary or create explicit dual parent'}]},
+  {id:'university',label:'university',synset:'university.n.03',def:'The body of faculty and students at a university.',path:'Actor → Human → group → organization → institution → university',parents:['institution'],virtual:false,flags:[],cross:[]},
+  {id:'business',label:'business',synset:'business.n.01',def:'A commercial or industrial enterprise and the people who constitute it.',path:'Actor → Human → group → organization → business',parents:['organization'],virtual:false,flags:[],cross:[]},
+  {id:'corporation',label:'corporation',synset:'corporation.n.01',def:'A business firm whose articles of incorporation have been approved in some state.',path:'Actor → Human → group → organization → business → corporation',parents:['business'],virtual:false,flags:[],cross:[]},
+  {id:'government',label:'government',synset:'government.n.01',def:'The organization that is the governing authority of a political unit.',path:'Actor → Human → group → organization → government',parents:['organization'],virtual:false,flags:[],cross:[]},
+  {id:'staff',label:'staff',synset:'staff.n.01',def:'Personnel who assist their superior in carrying out an assigned task.',path:'Actor → Human → group → staff',parents:['group'],virtual:false,flags:[],cross:[]},
+  {id:'community',label:'community',synset:'community.n.01',def:'A group of people living in a particular local area.',path:'Actor → Human → group → community',parents:['group'],virtual:false,flags:[],cross:[]},
+  {id:'audience',label:'audience',synset:'audience.n.01',def:'A gathering of spectators or listeners at a performance.',path:'Actor → Human → group → audience',parents:['group'],virtual:false,flags:[],cross:[]},
+  // Individual
+  {id:'person',label:'person',synset:'person.n.01',def:'A human being.',path:'Actor → Human → individual → person',parents:['human'],virtual:false,flags:[],cross:[]},
+  // Roles
+  {id:'worker',label:'worker',synset:'worker.n.01',def:'A person who works at a specific occupation.',path:'Actor → Human → individual → person → worker',parents:['person'],virtual:false,flags:[],cross:[]},
+  {id:'researcher',label:'researcher',synset:'research_worker.n.01',def:'A scientist who devotes themselves to doing research.',path:'Actor → Human → individual → person → worker → researcher',parents:['worker'],virtual:false,flags:['multi'],cross:[{rel:'multiple inheritance',val:'researcher connects to both an actor role and information-related activities'},{rel:'related activity',val:'Activities → 1.1 Create Information → Analyze → research'},{rel:'related artifact',val:'Info → publication, file, record'}]},
+  {id:'scientist',label:'scientist',synset:'scientist.n.01',def:'A person with advanced knowledge of natural sciences.',path:'Actor → Human → individual → person → worker → scientist',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'engineer',label:'engineer',synset:'engineer.n.01',def:'A person who uses scientific knowledge to solve practical problems.',path:'Actor → Human → individual → person → worker → engineer',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'doctor',label:'doctor',synset:'doctor.n.01',def:'A licensed medical practitioner.',path:'Actor → Human → individual → person → worker → doctor',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'nurse',label:'nurse',synset:'nurse.n.01',def:'One skilled in caring for young children or sick people.',path:'Actor → Human → individual → person → worker → nurse',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'lawyer',label:'lawyer',synset:'lawyer.n.01',def:'A professional person authorized to practice law.',path:'Actor → Human → individual → person → worker → lawyer',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'teacher',label:'teacher',synset:'teacher.n.01',def:'A person whose occupation is teaching.',path:'Actor → Human → individual → person → worker → teacher',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'manager',label:'manager / supervisor',synset:'supervisor.n.01',def:'One who supervises people.',path:'Actor → Human → individual → person → worker → manager',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'executive',label:'executive',synset:'executive.n.01',def:'A person responsible for the administration of a business.',path:'Actor → Human → individual → person → worker → executive',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'programmer',label:'programmer',synset:'programmer.n.01',def:'A person who designs and writes and tests computer programs.',path:'Actor → Human → individual → person → worker → programmer',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'architect',label:'architect',synset:'architect.n.01',def:'Someone who is responsible for inventing or achieving something.',path:'Actor → Human → individual → person → worker → architect',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'driver',label:'driver',synset:'driver.n.01',def:'Someone who drives a vehicle.',path:'Actor → Human → individual → person → worker → driver',parents:['worker'],virtual:false,flags:[],cross:[]},
+  {id:'pilot',label:'pilot',synset:'pilot.n.01',def:'Someone who is licensed to operate an aircraft in flight.',path:'Actor → Human → individual → person → worker → pilot',parents:['worker'],virtual:false,flags:[],cross:[]},
+  // Roles by relationship
+  {id:'customer',label:'customer',synset:'customer.n.01',def:'Someone who pays for goods or services.',path:'Actor → Human → individual → person → customer',parents:['person'],virtual:false,flags:[],cross:[]},
+  {id:'patient',label:'patient',synset:'patient.n.01',def:'A person who requires medical care.',path:'Actor → Human → individual → person → patient',parents:['person'],virtual:false,flags:[],cross:[]},
+  {id:'student',label:'student',synset:'student.n.01',def:'A learner who is enrolled in an educational institution.',path:'Actor → Human → individual → person → student',parents:['person'],virtual:false,flags:[],cross:[]},
+  {id:'leader',label:'leader',synset:'leader.n.01',def:'A person who rules or guides or inspires others.',path:'Actor → Human → individual → person → leader',parents:['person'],virtual:false,flags:[],cross:[]},
+  // Animal
+  {id:'animal-actor',label:'Animal',synset:'animal.n.01',def:'A living organism characterized by voluntary movement.',path:'Actor → Animal',parents:[],virtual:false,flags:['multi'],cross:[{rel:'multiple inheritance',val:'animal also classified as Natural Entity in Physical subontology'},{rel:'note',val:'as an Actor, animal has agency (e.g. trained dog, livestock); as a Physical entity, it is an object of work'}]},
+  // Machine
+  {id:'machine-actor',label:'Machine',synset:'—',def:'An automated system that can act as an agent.',path:'Actor → Machine',parents:[],virtual:false,flags:[],cross:[]},
+  // Other
+  {id:'other-actor',label:'Other / Unspecified',synset:'—',def:'Groups or entities that do not fit the above categories.',path:'Actor → Other',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'network-other',label:'network',synset:'network.n.01',def:'An interconnected system of things or people.',path:'Actor → Other → network',parents:['other-actor'],virtual:false,flags:[],cross:[]},
+  {id:'ecosystem',label:'ecosystem',synset:'ecosystem.n.01',def:'A system formed by the interaction of a community of organisms with their environment.',path:'Actor → Other → ecosystem',parents:['other-actor'],virtual:false,flags:[],cross:[]},
+  // Misclassified
+  {id:'misc-actor',label:'Misclassified',synset:'—',def:'Items that appear in the Actor subontology but belong elsewhere.',path:'Actor → Misclassified',parents:[],virtual:false,flags:['naming'],cross:[{rel:'note',val:'These are events or gatherings, not actors. Suggest moving to Activities subontology.'}]},
+  {id:'meeting',label:'meeting',synset:'meeting.n.01',def:'A formally arranged gathering.',path:'Actor → Misclassified → meeting',parents:['misc-actor'],virtual:false,flags:['naming'],cross:[{rel:'misclassified',val:'This is an event/activity, not an actor. Move to Activities → 3.4 Events'}]},
+  {id:'conference',label:'conference',synset:'conference.n.01',def:'A prearranged meeting for consultation or exchange of information.',path:'Actor → Misclassified → conference',parents:['misc-actor'],virtual:false,flags:['naming'],cross:[{rel:'misclassified',val:'This is an event, not an actor. Move to Activities → 3.4 Events'}]},
+],
+
+activities: [
+  {id:'info-act',label:'1. Information Activities',synset:'—',def:'Activities involving creating, modifying, storing, or transferring information.',path:'Activities → Information',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'create-info',label:'1.1 Create Information',synset:'—',def:'Activities that produce new information.',path:'Activities → Information → Create',parents:['info-act'],virtual:false,flags:[],cross:[]},
+  {id:'analyze',label:'Analyze',synset:'—',def:'Examine methodically by separating into parts and studying their interrelations.',path:'Activities → Information → Create → Analyze',parents:['create-info'],virtual:false,flags:[],cross:[]},
+  {id:'investigation',label:'investigation',synset:'investigation.n.02',def:'The work of inquiring into something thoroughly and systematically.',path:'Activities → Information → Create → Analyze → investigation',parents:['analyze'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Investigate (Investigate.v.01)'}]},
+  {id:'research',label:'research',synset:'research.n.01',def:'Systematic investigation to establish facts.',path:'Activities → Information → Create → Analyze → research',parents:['analyze'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Research (Research.v.01, Research.v.02)'},{rel:'cross-ontology',val:'Actor → researcher (role that performs this activity)'}]},
+  {id:'experiment',label:'experiment',synset:'experiment.n.01',def:'The act of conducting a controlled test or investigation.',path:'Activities → Information → Create → Analyze → experiment',parents:['analyze'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Experiment (Experiment.v.01)'}]},
+  {id:'inspection',label:'inspection',synset:'inspection.n.01',def:'A formal or official examination.',path:'Activities → Information → Create → Analyze → inspection',parents:['analyze'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Inspect (Inspect.v.01)'}]},
+  {id:'survey',label:'survey',synset:'survey.n.01',def:'A detailed critical inspection.',path:'Activities → Information → Create → Analyze → survey',parents:['analyze'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Survey (Survey.v.02, Survey.v.05)'}]},
+  {id:'calculate',label:'Calculate',synset:'—',def:'Compute by mathematical reasoning.',path:'Activities → Information → Create → Calculate',parents:['create-info'],virtual:false,flags:[],cross:[]},
+  {id:'calculation',label:'calculation',synset:'calculation.n.01',def:'Problem solving that involves numbers.',path:'Activities → Information → Create → Calculate → calculation',parents:['calculate'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Calculate (Calculate.v.01, Calculate.v.02)'}]},
+  {id:'decide',label:'Decide',synset:'—',def:'Reach a conclusion or make a choice.',path:'Activities → Information → Create → Decide',parents:['create-info'],virtual:false,flags:[],cross:[]},
+  {id:'decision',label:'decision',synset:'decision.n.01',def:'The act of making up your mind about something.',path:'Activities → Information → Create → Decide → decision',parents:['decide'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Decide (Decide.v.01)'}]},
+  {id:'diagnosis',label:'diagnosis',synset:'diagnosis.n.01',def:'Identifying the nature of an illness or problem.',path:'Activities → Information → Create → Decide → diagnosis',parents:['decide'],virtual:false,flags:[{val:'dup'}],cross:[{rel:'verb link',val:'Diagnose (Diagnose.v.01)'}]},
+  {id:'plan-act',label:'Plan',synset:'—',def:'Make or work out a plan for; devise.',path:'Activities → Information → Create → Plan',parents:['create-info'],virtual:false,flags:[],cross:[]},
+  {id:'planning',label:'planning',synset:'planning.n.01',def:'The act or process of drawing up plans or layouts for some project.',path:'Activities → Information → Create → Plan → planning',parents:['plan-act'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Plan (Mastermind.v.01, Plan.v.02, Plan.v.03)'}]},
+  {id:'design-act',label:'design',synset:'design.n.01',def:'The act of working out the form of something (as by making a sketch or outline).',path:'Activities → Information → Create → Plan → design',parents:['plan-act'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Design (Design.v.02)'}]},
+  {id:'modify-info',label:'1.2 Modify Information',synset:'—',def:'Activities that transform existing information.',path:'Activities → Information → Modify',parents:['info-act'],virtual:false,flags:[],cross:[]},
+  {id:'revision',label:'revision',synset:'revision.n.01',def:'The act of revising or altering (involving reconsideration and change).',path:'Activities → Information → Modify → revision',parents:['modify-info'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Revise (Revise.v.01)'}]},
+  {id:'correction',label:'correction',synset:'correction.n.01',def:'The act of offering an improvement to replace a mistake.',path:'Activities → Information → Modify → correction',parents:['modify-info'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Correct (Correct.v.01, Repair.v.01)'}]},
+  {id:'transfer-info',label:'1.4 Transfer Information',synset:'—',def:'Activities that move or share information between parties.',path:'Activities → Information → Transfer',parents:['info-act'],virtual:false,flags:[],cross:[]},
+  {id:'communicate',label:'Communicate',synset:'communication.n.01',def:'Transmit thoughts or feelings.',path:'Activities → Information → Transfer → Communicate',parents:['transfer-info'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Communicate (Communicate.v.01, Communicate.v.02, Communicate.v.05)'}]},
+  {id:'teach',label:'Teach',synset:'education.n.01',def:'Impart skills or knowledge to.',path:'Activities → Information → Transfer → Communicate → Teach',parents:['communicate'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Teach (Educate.v.01, Teach.v.01)'}]},
+  {id:'advertise',label:'Advertise',synset:'advertising.n.02',def:'Call attention to in order to promote sales.',path:'Activities → Information → Transfer → Communicate → Advertise',parents:['communicate'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Advertise (Advertise.v.02)'}]},
+  // Physical
+  {id:'phys-act',label:'2. Physical Activities',synset:'—',def:'Activities involving creating, modifying, storing, or transferring physical objects.',path:'Activities → Physical',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'create-phys',label:'2.1 Create Physical Objects',synset:'—',def:'Activities that produce physical objects.',path:'Activities → Physical → Create',parents:['phys-act'],virtual:false,flags:[],cross:[]},
+  {id:'construction',label:'construction',synset:'construction.n.01',def:'The act of constructing something (as a piece of machinery).',path:'Activities → Physical → Create → construction',parents:['create-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Construct (Construct.v.01)'}]},
+  {id:'fabrication',label:'fabrication',synset:'fabrication.n.03',def:'The act of making something from raw materials.',path:'Activities → Physical → Create → fabrication',parents:['create-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Fabricate (Manufacture.v.01, Produce.v.01)'}]},
+  {id:'modify-phys',label:'2.2 Modify Physical Objects',synset:'—',def:'Activities that transform existing physical objects.',path:'Activities → Physical → Modify',parents:['phys-act'],virtual:false,flags:[],cross:[]},
+  {id:'repair',label:'repair',synset:'repair.n.01',def:'The act of putting something in working order again.',path:'Activities → Physical → Modify → repair',parents:['modify-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Repair (Repair.v.01)'}]},
+  {id:'cleaning',label:'cleaning',synset:'cleaning.n.01',def:'The act of making something clean.',path:'Activities → Physical → Modify → cleaning',parents:['modify-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Clean (Clean.v.01, Clean.v.02)'}]},
+  {id:'cooking',label:'cooking',synset:'cooking.n.01',def:'The process of preparing food by applying heat.',path:'Activities → Physical → Modify → cooking',parents:['modify-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Cook (Cook.v.02, Cook.v.03)'}]},
+  {id:'transfer-phys',label:'2.4 Transfer Physical Objects',synset:'—',def:'Activities that move or exchange physical objects.',path:'Activities → Physical → Transfer',parents:['phys-act'],virtual:false,flags:[],cross:[]},
+  {id:'transportation',label:'transportation',synset:'transportation.n.02',def:'The activity of transporting something from one location to another.',path:'Activities → Physical → Transfer → transportation',parents:['transfer-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Transport (Transport.v.01, Transport.v.04)'}]},
+  {id:'delivery',label:'delivery',synset:'delivery.n.01',def:'The act of delivering something.',path:'Activities → Physical → Transfer → delivery',parents:['transfer-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Deliver (Deliver.v.02)'}]},
+  {id:'sale',label:'sale',synset:'sale.n.02',def:'The general activity of selling.',path:'Activities → Physical → Transfer → sale',parents:['transfer-phys'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Sell (Sell.v.01)'}]},
+  // Interactive
+  {id:'inter-act',label:'3. Interactive Activities',synset:'—',def:'Activities involving interaction between actors.',path:'Activities → Interactive',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'perform',label:'Perform',synset:'procedure.n.01',def:'Carry out or do something.',path:'Activities → Interactive → Perform',parents:['inter-act'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Perform (Perform.v.01)'}]},
+  {id:'manage',label:'Manage',synset:'management.n.01',def:'Be in charge of, deal with, or control.',path:'Activities → Interactive → Manage',parents:['inter-act'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Manage (Manage.v.02)'}]},
+  {id:'assist',label:'Assist',synset:'aid.n.02',def:'Give help or support to.',path:'Activities → Interactive → Assist',parents:['inter-act'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Assist (Help.v.01, Support.v.01)'}]},
+  {id:'treat',label:'Treat (medical)',synset:'treatment.n.01',def:'Provide medical care for.',path:'Activities → Interactive → Assist → Treat',parents:['assist'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Treat (Treat.v.03)'}]},
+  {id:'events',label:'3.4 Events',synset:'—',def:'Social or institutional gatherings.',path:'Activities → Interactive → Events',parents:['inter-act'],virtual:false,flags:[],cross:[]},
+  {id:'ceremony',label:'ceremony',synset:'ceremony.n.01',def:'A formal event performed on a special occasion.',path:'Activities → Interactive → Events → ceremony',parents:['events'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Attend (go to) (Attend.v.01)'}]},
+  {id:'legal-proc',label:'legal proceeding',synset:'proceeding.n.01',def:'(law) the institution of a sequence of steps by which legal judgments are invoked.',path:'Activities → Interactive → Events → legal proceeding',parents:['events'],virtual:false,flags:[],cross:[{rel:'verb link',val:'Participate (Enter.v.02)'}]},
+  // Misc
+  {id:'misc-act',label:'4. Miscellaneous Changes',synset:'—',def:'Non-agentive changes, natural processes, and errors.',path:'Activities → Miscellaneous',parents:[],virtual:false,flags:[],cross:[]},
+  {id:'misclass-act',label:'5. Misclassified',synset:'—',def:'Items in this ontology that belong elsewhere.',path:'Activities → Misclassified',parents:[],virtual:false,flags:['naming'],cross:[]},
+  {id:'occupation',label:'occupation',synset:'occupation.n.01',def:'The principal activity in your life that you do to earn money.',path:'Activities → Misclassified → occupation',parents:['misclass-act'],virtual:false,flags:['naming'],cross:[{rel:'misclassified',val:'This is an Actor role-type, not an activity. Move to Actor subontology.'}]},
+  {id:'industry',label:'industry (sector)',synset:'industry.n.02',def:'The people or companies engaged in a particular kind of commercial enterprise.',path:'Activities → Misclassified → industry',parents:['misclass-act'],virtual:false,flags:['naming'],cross:[{rel:'misclassified',val:'This describes an institutional/economic context, not an activity. Move to Actor → organization or create a Context ontology.'}]},
+]
+
+};
+
+// ─────────────────────────────────────────────
+// AI SUGGESTIONS
+// ─────────────────────────────────────────────
+const SUGGESTIONS = {
+  'overgarment-v':[{id:'sg1',type:'virtual',label:'Redundant virtual node',desc:'"overgarment" is virtual with only one child (coat). Collapse: connect coat directly to clothing.',conf:87}],
+  'coat-v':[{id:'sg2',type:'virtual',label:'Redundant virtual layer',desc:'"coat" is also virtual and the chain overgarment→coat→jacket adds unnecessary depth. Consider: clothing → jacket directly, or clothing → coat (non-virtual) → jacket.',conf:79},{id:'sg3',type:'multi',label:'Multiple inheritance candidate',desc:'"coat" may belong under both Clothing and Protective Clothing depending on occupational context (e.g. lab coat).',conf:44}],
+  'window-phys':[{id:'sg4',type:'dup',label:'Duplicate label — same ontology',desc:'"window.n.01" (structural frame) and "window.n.02" (transparent panel) have slightly different meanings but are placed in the same subontology under the same parent. Clarify distinction or merge.',conf:72}],
+  'window-opening':[{id:'sg5',type:'dup',label:'Cross-ontology duplicate',desc:'"window" appears in both Physical (structural frame/opening) and Info (GUI element — window.n.02). Different senses, but the same label without disambiguation creates confusion for users.',conf:85}],
+  'code-info':[{id:'sg6',type:'dup',label:'Duplicate label — same subontology',desc:'"code.n.01" (cipher) and "code.n.03" (programming instructions) both exist in the Info subontology with the same parent. Rename one: suggest "cipher code" vs. "source code".',conf:91}],
+  'code-cipher':[{id:'sg7',type:'dup',label:'Duplicate label — same subontology',desc:'"code.n.01" (cipher system) and "code.n.03" (programming instructions) share the label "code". Recommend renaming for clarity.',conf:91}],
+  'software-phys':[{id:'sg8',type:'multi',label:'Multiple inheritance',desc:'"software" appears in both Physical (as a device/artifact) and Info (as a coding system). These represent genuinely different facets. Add explicit dual parent rather than duplicating the node.',conf:75}],
+  'software-info':[{id:'sg9',type:'multi',label:'Multiple inheritance',desc:'"software" also belongs under Physical → Artifact → instrumentality. Consider cross-linking rather than maintaining two separate nodes.',conf:75}],
+  'product-phys':[{id:'sg10',type:'naming',label:'Naming ambiguity',desc:'"product" is overloaded: it covers physical goods but in a workplace context also means software, marketing strategies, slide decks, etc. Consider renaming to "physical product" or splitting into "physical output" vs. "work product".',conf:68}],
+  'railway-v':[{id:'sg11',type:'virtual',label:'Virtual node — utility unclear',desc:'"railway" is a virtual ancestor not from O*NET tasks. As a physical infrastructure it may belong here, but "railway" as an organization belongs in Actor subontology (already present there). Consider removing or renaming.',conf:83}],
+  'researcher':[{id:'sg12',type:'multi',label:'Multiple inheritance',desc:'"researcher" connects to both Actor (role) and Information Activities (research). Cross-link to Activities → 1.1 Analyze → research and Info → publication as related artifacts.',conf:69}],
+  'school-actor':[{id:'sg13',type:'multi',label:'Multiple inheritance — classic case',desc:'"school" appears as an institution in Actor and as a building in Physical. Both senses are legitimate and context-dependent. Recommend explicit dual-parent annotation rather than choosing one.',conf:82}],
+  'school-phys':[{id:'sg14',type:'multi',label:'Multiple inheritance — classic case',desc:'"school" as a physical building (Physical subontology) should cross-link to school as an institution (Actor subontology). Both parents are valid.',conf:82}],
+  'animal':[{id:'sg15',type:'multi',label:'Multiple inheritance',desc:'"animal" appears in Physical (Natural Entities) and Actor. As an Actor it has agency (livestock, working animals, guide dogs). Recommend dual parent with context qualifier.',conf:77}],
+  'animal-actor':[{id:'sg16',type:'multi',label:'Duplicate across subontologies',desc:'"animal" is also listed under Physical → Natural Entities. Recommend a single canonical node with dual parents rather than two separate nodes.',conf:77}],
+  'misc-actor':[{id:'sg17',type:'naming',label:'Misclassified category',desc:'Items under "Misclassified" (meeting, conference, party, etc.) are events or gatherings, not actors. Move to Activities → 3.4 Events.',conf:94}],
+  'meeting':[{id:'sg18',type:'naming',label:'Misclassified node',desc:'"meeting" is an event, not an actor. Move to Activities → 3.4 Events → social events.',conf:96}],
+  'conference':[{id:'sg19',type:'naming',label:'Misclassified node',desc:'"conference" is an event, not an actor. Move to Activities → 3.4 Events.',conf:96}],
+  'occupation':[{id:'sg20',type:'naming',label:'Misclassified node',desc:'"occupation" is a role-type, not an activity. Move to Actor subontology as a property of worker roles.',conf:90}],
+  'industry':[{id:'sg21',type:'naming',label:'Misclassified node',desc:'"industry (sector)" describes an economic/institutional context, not an activity. Consider creating an institutional context ontology or move to Actor → organization.',conf:85}],
+};
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+let currentSubonto = 'physical';
+let activeNodeId = null;
+let activeTab = 'detail';
+const resolved = {}; // sugId → action
+const reviewLog = [];
+const expanded = {};
+
+// ─────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────
+function getNodes() { return SUBONTOS[currentSubonto] || []; }
+function findNode(id) { return getNodes().find(n => n.id === id); }
+
+function switchSubonto(key, el) {
+  currentSubonto = key;
+  activeNodeId = null;
+  document.querySelectorAll('.stab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  renderTree();
+  showEmptyDetail();
+  showEmptySug();
+  updateStats();
+}
+
+function switchTab(tab, el) {
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-detail').style.display = tab === 'detail' ? 'block' : 'none';
+  document.getElementById('tab-log').style.display = tab === 'log' ? 'block' : 'none';
+  document.getElementById('tab-dashboard').style.display = tab === 'dashboard' ? 'block' : 'none';
+  if (tab === 'log') renderLog();
+  if (tab === 'dashboard') renderDashboard();
+  if (tab === 'detail' && activeNodeId) showDetail(findNode(activeNodeId));
+}
+
+function updateStats() {
+  const nodes = getNodes();
+  const flagged = nodes.filter(n => n.flags.length > 0).length;
+  document.getElementById('stat-nodes').textContent = nodes.length;
+  document.getElementById('stat-flagged').textContent = flagged;
+  document.getElementById('stat-reviewed').textContent = Object.keys(resolved).length;
+}
+
+// ─────────────────────────────────────────────
+// TREE RENDER
+// ─────────────────────────────────────────────
+function renderTree(filterTerm = '') {
+  const nodes = getNodes();
+  const container = document.getElementById('tree-container');
+  container.innerHTML = '';
+  const term = filterTerm.toLowerCase().trim();
+  const roots = nodes.filter(n => n.parents.length === 0);
+
+  function renderNode(node, depth) {
+    if (term && !node.label.toLowerCase().includes(term) && !node.synset.toLowerCase().includes(term)) return;
+    const children = nodes.filter(n => n.parents.includes(node.id));
+    const isExpanded = expanded[node.id] !== false;
+    const row = document.createElement('div');
+    row.className = 'tree-node' + (activeNodeId === node.id ? ' active' : '');
+    row.style.paddingLeft = (depth * 14 + 4) + 'px';
+
+    const toggle = document.createElement('span');
+    toggle.className = 'tree-toggle';
+    toggle.textContent = children.length > 0 ? (isExpanded ? '▾' : '▸') : '';
+    row.appendChild(toggle);
+
+    const lbl = document.createElement('span');
+    lbl.className = 'node-label' + (node.virtual ? ' virtual' : '');
+    lbl.textContent = node.label;
+    row.appendChild(lbl);
+
+    node.flags.forEach(f => {
+      const badge = document.createElement('span');
+      badge.className = 'flag f-' + f;
+      badge.textContent = f;
+      row.appendChild(badge);
+    });
+
+    row.addEventListener('click', (e) => {
+      if (e.target === toggle && children.length > 0) {
+        expanded[node.id] = !isExpanded;
+        renderTree(filterTerm);
+        return;
+      }
+      activeNodeId = node.id;
+      showDetail(node);
+      showSuggestions(node);
+      renderTree(filterTerm);
+    });
+    container.appendChild(row);
+    if (children.length > 0 && (isExpanded || term)) {
+      children.forEach(c => renderNode(c, depth + 1));
+    }
+  }
+  roots.forEach(r => renderNode(r, 0));
+  updateStats();
+}
+
+window.filterTree = (val) => renderTree(val);
+
+// ─────────────────────────────────────────────
+// DETAIL PANEL
+// ─────────────────────────────────────────────
+function showEmptyDetail() {
+  document.getElementById('tab-detail').innerHTML = '<div class="empty-center"><div class="empty-icon">⬡</div><p style="font-size:13px">Select a node to view details</p></div>';
+}
+
+function showDetail(node) {
+  if (activeTab !== 'detail') return;
+  const nodes = getNodes();
+  const parents = nodes.filter(n => node.parents.includes(n.id));
+  const children = nodes.filter(n => n.parents.includes(node.id));
+  const siblings = parents.length ? nodes.filter(n => n.parents.some(p => node.parents.includes(p)) && n.id !== node.id) : [];
+  let html = `
+    <div class="detail-section">
+      <div class="node-title">${node.label}${node.virtual ? ' <span style="font-size:12px;color:var(--gold);font-family:DM Sans,sans-serif">[virtual]</span>' : ''}</div>
+      <div class="node-synset">${node.synset}</div>
+    </div>
+    <div class="detail-section"><div class="dl">Definition</div><div class="dv">${node.def}</div></div>
+    <div class="detail-section"><div class="dl">Ontology path</div><div class="path-display">${node.path}</div></div>
+    <hr class="divider">`;
+  if (parents.length) {
+    html += `<div class="detail-section"><div class="dl">Parent${parents.length > 1 ? 's' : ''}</div><div class="badge-wrap">`;
+    parents.forEach(p => { html += `<span class="badge parent" onclick="selectNode('${p.id}')">${p.label}${p.virtual ? ' [v]' : ''}</span>`; });
+    html += `</div></div>`;
+  }
+  if (children.length) {
+    html += `<div class="detail-section"><div class="dl">Children (${children.length})</div><div class="badge-wrap">`;
+    children.slice(0, 12).forEach(c => { html += `<span class="badge child" onclick="selectNode('${c.id}')">${c.label}</span>`; });
+    if (children.length > 12) html += `<span class="badge">${children.length - 12} more…</span>`;
+    html += `</div></div>`;
+  }
+  if (siblings.length) {
+    html += `<div class="detail-section"><div class="dl">Siblings</div><div class="badge-wrap">`;
+    siblings.slice(0, 6).forEach(s => { html += `<span class="badge" onclick="selectNode('${s.id}')">${s.label}</span>`; });
+    if (siblings.length > 6) html += `<span class="badge">+${siblings.length - 6} more</span>`;
+    html += `</div></div>`;
+  }
+  if (node.cross && node.cross.length) {
+    html += `<hr class="divider"><div class="detail-section"><div class="dl">Cross-ontology relations</div>`;
+    node.cross.forEach(c => { html += `<div class="cross-row"><span class="cross-rel">${c.rel}</span><span class="cross-val">${c.val}</span></div>`; });
+    html += `</div>`;
+  }
+  document.getElementById('tab-detail').innerHTML = html;
+}
+
+window.selectNode = (id) => {
+  const node = findNode(id);
+  if (!node) return;
+  activeNodeId = id;
+  showDetail(node);
+  showSuggestions(node);
+  renderTree(document.getElementById('search-input').value);
+};
+
+// ─────────────────────────────────────────────
+// SUGGESTIONS PANEL
+// ─────────────────────────────────────────────
+function showEmptySug() {
+  document.getElementById('suggestions-panel').innerHTML = '<div class="empty-state"><div class="ei">🤖</div><p>Select a node<br>to see AI suggestions</p></div>';
+}
+
+async function showSuggestions(node) {
+  const panel = document.getElementById('suggestions-panel');
+
+  if (anthropicApiKey) {
+    // Live AI path
+    panel.innerHTML = `<div class="ai-loading">
+      <div class="ai-loading-label"><div class="spinner"></div> Analyzing <strong style="color:var(--text)">${node.label}</strong>…</div>
+      <div class="ai-thinking">Claude is reviewing this node's position in the hierarchy, checking for duplicates, virtual node utility, and multiple inheritance…</div>
+    </div>`;
+
+    try {
+      const sugs = await fetchAISuggestions(node);
+      if (!sugs.length) {
+        panel.innerHTML = '<div class="empty-state"><div class="ei">✓</div><p style="color:var(--accent2)">No issues found<br>for this node</p></div>';
+        return;
+      }
+      renderSuggestionCards(panel, sugs, node);
+    } catch (err) {
+      panel.innerHTML = `<div class="empty-state"><div class="ei">⚠</div><p style="color:var(--err)">API error:<br>${err.message}</p><p style="margin-top:8px">Check your API key or try again.</p></div>`;
+    }
+  } else {
+    // Static fallback
+    const sugs = SUGGESTIONS[node.id] || [];
+    if (!sugs.length) {
+      panel.innerHTML = '<div class="empty-state"><div class="ei">✓</div><p style="color:var(--accent2)">No issues flagged<br>for this node</p></div>';
+      return;
+    }
+    renderSuggestionCards(panel, sugs, node);
+  }
+}
+
+function renderSuggestionCards(panel, sugs, node) {
+  panel.innerHTML = sugs.map(s => {
+    const isRes = resolved[s.id];
+    const confClass = s.conf >= 80 ? 'fill-high' : s.conf >= 55 ? 'fill-med' : 'fill-low';
+    const typeClass = 'type-' + (s.type || 'naming');
+    const aiClass = s.isAI ? ' ai-generated' : '';
+    return `<div class="sug-card${isRes ? ' resolved' : ''}${aiClass}" id="sc-${s.id}">
+      <div class="sug-type-label ${typeClass}"><div class="dot"></div><span class="tl">${s.label}</span></div>
+      <div class="sug-desc">${s.desc}</div>
+      <div class="conf-bar-wrap">
+        <div class="conf-bar-label"><span>Confidence</span><span>${s.conf}%</span></div>
+        <div class="conf-bar-bg"><div class="conf-bar-fill ${confClass}" style="width:${s.conf}%"></div></div>
+      </div>
+      ${isRes
+        ? `<div class="resolved-pill">✓ ${isRes}</div>`
+        : `<div class="action-row">
+            <button class="act-btn accept" onclick="decide('${s.id}','${node.id}','accepted','${encodeURIComponent(s.label)}')">Accept</button>
+            <button class="act-btn reject" onclick="decide('${s.id}','${node.id}','rejected','${encodeURIComponent(s.label)}')">Reject</button>
+            <button class="act-btn" onclick="decide('${s.id}','${node.id}','commented','${encodeURIComponent(s.label)}')">Comment</button>
+            <button class="act-btn escalate" onclick="decide('${s.id}','${node.id}','escalated','${encodeURIComponent(s.label)}')">Escalate</button>
+          </div>`
+      }
+    </div>`;
+  }).join('');
+}
+
+window.decide = (sugId, nodeId, action, labelEnc) => {
+  resolved[sugId] = action;
+  const label = labelEnc ? decodeURIComponent(labelEnc) : sugId;
+  reviewLog.unshift({ sugId, nodeId, action, label, time: new Date().toLocaleTimeString() });
+  // Update just this card in place
+  const card = document.getElementById('sc-' + sugId);
+  if (card) {
+    card.classList.add('resolved');
+    const actRow = card.querySelector('.action-row');
+    if (actRow) actRow.outerHTML = `<div class="resolved-pill">✓ ${action}</div>`;
+  }
+  document.getElementById('stat-reviewed').textContent = Object.keys(resolved).length;
+  if (activeTab === 'log') renderLog();
+  if (activeTab === 'dashboard') renderDashboard();
+};
+
+// ─────────────────────────────────────────────
+// LOG PANEL
+// ─────────────────────────────────────────────
+function renderLog() {
+  const el = document.getElementById('tab-log');
+  if (!reviewLog.length) {
+    el.innerHTML = '<div class="empty-state"><div class="ei">📋</div><p>No decisions logged yet.<br>Start reviewing nodes to build the log.</p></div>';
+    return;
+  }
+  el.innerHTML = reviewLog.map(l => {
+    const node = findNode(l.nodeId);
+    return `<div class="log-entry log-${l.action}">
+      <div class="log-action ${l.action}">${l.action}</div>
+      <div class="log-detail"><strong>${node ? node.label : l.nodeId}</strong> — ${l.label || l.sugId}</div>
+      <div class="log-time">${l.time}</div>
+    </div>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────
+function renderDashboard() {
+  const allSugs = Object.values(SUGGESTIONS).flat();
+  const nodes = getNodes();
+  document.getElementById('d-total').textContent = nodes.length;
+  document.getElementById('d-virtual').textContent = nodes.filter(n => n.virtual).length;
+  document.getElementById('d-flagged').textContent = nodes.filter(n => n.flags.length > 0).length;
+  document.getElementById('d-dup').textContent = nodes.filter(n => n.flags.includes('dup')).length;
+  document.getElementById('d-multi').textContent = nodes.filter(n => n.flags.includes('multi')).length;
+  document.getElementById('d-resolved').textContent = Object.keys(resolved).length;
+  document.getElementById('cd-high').textContent = allSugs.filter(s => s.conf >= 80).length;
+  document.getElementById('cd-med').textContent = allSugs.filter(s => s.conf >= 55 && s.conf < 80).length;
+  document.getElementById('cd-low').textContent = allSugs.filter(s => s.conf < 55).length;
+  const types = {};
+  allSugs.forEach(s => { types[s.type] = (types[s.type] || 0) + 1; });
+  const typeNames = { dup: 'Duplicate/polysemous', virtual: 'Virtual node', multi: 'Multiple inheritance', naming: 'Naming/misclassification' };
+  const typeColors = { dup: 'var(--err)', virtual: 'var(--gold)', multi: 'var(--info)', naming: 'var(--warn)' };
+  document.getElementById('type-breakdown').innerHTML = Object.entries(types).map(([t, count]) =>
+    `<div class="conf-row"><div class="conf-dot" style="background:${typeColors[t] || '#888'}"></div><div class="conf-text">${typeNames[t] || t}</div><div class="conf-count">${count}</div></div>`
+  ).join('');
+}
+
+// ─────────────────────────────────────────────
+// API KEY MANAGEMENT
+// ─────────────────────────────────────────────
+let anthropicApiKey = null;
+
+function saveApiKey() {
+  const val = document.getElementById('api-key-input').value.trim();
+  if (!val.startsWith('sk-ant-')) {
+    document.getElementById('api-status').textContent = '✗ Key should start with sk-ant-';
+    document.getElementById('api-status').style.color = 'var(--err)';
+    return;
+  }
+  anthropicApiKey = val;
+  document.getElementById('api-status').textContent = '✓ Connected — live AI suggestions enabled';
+  document.getElementById('api-status').className = 'api-status ok';
+  document.getElementById('api-bar').className = 'api-bar connected';
+  document.getElementById('ai-mode-badge').textContent = 'live AI';
+  document.getElementById('ai-mode-badge').className = 'live-badge';
+  document.getElementById('api-key-input').value = '••••••••••••••••••••';
+  // Re-run suggestions for active node if one is selected
+  if (activeNodeId) {
+    const node = findNode(activeNodeId);
+    if (node) showSuggestions(node);
+  }
+}
+
+// Allow Enter key in API input
+document.getElementById('api-key-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveApiKey();
+});
+
+// ─────────────────────────────────────────────
+// LIVE CLAUDE API CALL
+// ─────────────────────────────────────────────
+const aiCache = {}; // nodeId → suggestions array (avoid redundant calls)
+
+async function fetchAISuggestions(node) {
+  if (aiCache[node.id]) return aiCache[node.id];
+
+  const nodes = getNodes();
+  const parents = nodes.filter(n => node.parents.includes(n.id));
+  const children = nodes.filter(n => n.parents.includes(node.id));
+  const siblings = parents.length ? nodes.filter(n => n.parents.some(p => node.parents.includes(p)) && n.id !== node.id) : [];
+  const allNodeLabels = nodes.map(n => n.label);
+
+  const prompt = `You are an expert ontology editor reviewing the O*NET Noun Ontology — a hierarchy of work-related nouns derived from the US Occupational Database.
+
+You are analyzing a single node. Return ONLY a JSON array of suggestion objects. No preamble, no markdown, no explanation outside the JSON.
+
+NODE:
+- Label: ${node.label}
+- WordNet synset: ${node.synset}
+- Definition: ${node.def}
+- Is virtual (not from O*NET): ${node.virtual}
+- Path: ${node.path}
+- Parents: ${parents.map(p => p.label + (p.virtual ? ' [virtual]' : '')).join(', ') || 'none (root)'}
+- Children (${children.length}): ${children.slice(0,8).map(c => c.label).join(', ')}${children.length > 8 ? '...' : ''}
+- Siblings: ${siblings.slice(0,6).map(s => s.label).join(', ')}
+- Cross-ontology notes already flagged: ${node.cross.map(c => c.rel + ': ' + c.val).join(' | ') || 'none'}
+- Current flags: ${node.flags.join(', ') || 'none'}
+
+ONTOLOGY CONTEXT:
+This ontology has 4 subontologies: Physical, Info, Actor, Activities.
+Key known issues: polysemous terms (same label, different WordNet senses), unnecessary virtual intermediate nodes, multiple inheritance cases, naming ambiguity, misclassified nodes.
+The goal is MECE (Mutually Exclusive, Collectively Exhaustive) organization to support AI applicability prediction for occupations.
+
+OUTPUT: A JSON array where each item has:
+- "type": one of "dup" | "virtual" | "multi" | "naming" | "hierarchy" | "missing"
+- "label": short issue title (max 5 words)
+- "desc": specific, actionable recommendation (2-3 sentences, referencing actual node names and synsets where relevant)
+- "conf": integer 0-100 (your confidence this is a real issue)
+
+Return [] if you find no issues. Return 1-4 suggestions maximum. Be specific and concrete — generic observations are unhelpful.`;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': anthropicApiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.error?.message || `API error ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.content.map(b => b.text || '').join('');
+  const clean = text.replace(/```json|```/g, '').trim();
+  const parsed = JSON.parse(clean);
+
+  // Assign stable ids
+  const suggestions = parsed.map((s, i) => ({
+    ...s,
+    id: `ai-${node.id}-${i}`,
+    isAI: true
+  }));
+
+  aiCache[node.id] = suggestions;
+  return suggestions;
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+renderTree();
+updateStats();
+renderDashboard();
+</script>
+</body>
+</html>
