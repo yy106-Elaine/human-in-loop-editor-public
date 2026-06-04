@@ -1,13 +1,16 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { OntologyTree } from "./components/OntologyTree";
 import { SemanticReview } from "./components/SemanticReview";
 import { ReviewerActions } from "./components/ReviewerActions";
 import { DiffSimulator } from "./components/DiffSimulator";
+import { getNodeContext } from "./components/ontologyLookup";
 
 export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>("school");
   const [apiKey, setApiKey] = useState("");
   const [connected, setConnected] = useState(false);
+
+  const context = useMemo(() => getNodeContext(selectedNodeId), [selectedNodeId]);
 
   return (
     <div className="h-screen bg-gray-100 flex flex-col overflow-hidden">
@@ -59,15 +62,15 @@ export default function App() {
           </div>
 
           <div className="min-h-0 overflow-hidden">
-            <SemanticReview nodeId={selectedNodeId} />
+            <SemanticReview context={context} />
           </div>
 
           <div className="row-span-2 min-h-0 overflow-hidden">
-            <ReviewerActions nodeId={selectedNodeId} />
+            <ReviewerActions context={context} apiConnected={connected} />
           </div>
 
           <div className="min-h-0 overflow-hidden">
-            <DiffSimulator nodeId={selectedNodeId} />
+            <DiffSimulator context={context} />
           </div>
         </div>
       </div>
