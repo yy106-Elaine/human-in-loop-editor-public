@@ -7,6 +7,7 @@ import {
   GitMerge,
   AlertTriangle,
   BookOpen,
+  Sparkles,
 } from "lucide-react";
 import {
   getCaseMetadata,
@@ -23,7 +24,53 @@ interface CaseMetadata {
   notes?: string;
 }
 
-export function ReviewerActions({ nodeId }: { nodeId: string }) {
+// Placeholder AI suggestions (static for now; live generation comes later).
+interface Suggestion {
+  id: string;
+  title: string;
+  body: string;
+  confidence: number;
+}
+const PLACEHOLDER_SUGGESTIONS: Suggestion[] = [
+  {
+    id: "s1",
+    title: "Possible duplicate sense",
+    body: "This node may overlap with another synset under a different branch. Review whether the two senses should be merged or kept distinct.",
+    confidence: 0.85,
+  },
+  {
+    id: "s2",
+    title: "Candidate for multiple inheritance",
+    body: "The concept appears to belong under more than one parent. Consider adding an additional inheritance path.",
+    confidence: 0.62,
+  },
+];
+
+function ConfidenceBar({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between text-[11px] text-gray-500 mb-1">
+        <span>Confidence</span>
+        <span>{pct}%</span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-blue-600"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function ReviewerActions({
+  nodeId,
+  apiConnected = false,
+}: {
+  nodeId: string;
+  apiConnected?: boolean;
+}) {
   const [notes, setNotes] = useState("");
   const [metadata, setMetadata] = useState<CaseMetadata | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -64,13 +111,63 @@ export function ReviewerActions({ nodeId }: { nodeId: string }) {
 
   return (
     <div className="h-full bg-white border-l border-gray-200 overflow-y-auto">
-      <div className="p-4 border-b border-gray-200">
+      {/* Header */}
+      <div className="p-4 border-b border-gray-200 flex items-center justify-between">
         <h2 className="text-sm font-semibold text-gray-900">
-          Reviewer Actions
+          AI Suggestions &amp; Reviewer Actions
         </h2>
+        <span
+          className={`text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
+            apiConnected
+              ? "bg-emerald-50 text-emerald-700"
+              : "bg-gray-100 text-gray-500"
+          }`}
+        >
+          <Sparkles size={10} />
+          {apiConnected ? "live AI" : "offline"}
+        </span>
       </div>
 
+      {/* AI SUGGESTIONS (your design) */}
+      <div className="p-4 border-b border-gray-200">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-3">
+          AI Suggestions
+        </div>
+        <div className="space-y-3">
+          {PLACEHOLDER_SUGGESTIONS.map((s) => (
+            <div
+              key={s.id}
+              className="border border-gray-200 rounded-lg p-3.5"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-medium text-gray-900">
+                  {s.title}
+                </p>
+                <span className="text-[10px] text-gray-400 shrink-0 mt-0.5">
+                  AI
+                </span>
+              </div>
+              <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
+                {s.body}
+              </p>
+              <ConfidenceBar value={s.confidence} />
+            </div>
+          ))}
+          {!apiConnected && (
+            <p className="text-[11px] text-gray-400 italic">
+              Showing sample suggestions. Connect an Anthropic API key to
+              generate live ones.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* REVIEWER ACTIONS (Sophia's full set, wired to backend) */}
       <div className="p-4 space-y-2">
+        <div className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-1">
+          Reviewer Actions
+        </div>
+
         <ActionButton
           icon={<Check size={16} />}
           label="Approve Edit"
@@ -130,6 +227,7 @@ export function ReviewerActions({ nodeId }: { nodeId: string }) {
         />
       </div>
 
+      {/* REVIEWER NOTES */}
       <div className="p-4 border-t border-gray-200 mt-4">
         <h3 className="text-sm font-semibold text-gray-900 mb-2">
           Reviewer Notes
@@ -140,46 +238,28 @@ export function ReviewerActions({ nodeId }: { nodeId: string }) {
           className="w-full h-32 px-3 py-2 text-sm border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           placeholder="Add notes about this case..."
         />
-
         <button
           onClick={handleSaveNotes}
           className="w-full mt-2 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
         >
           Save Notes
         </button>
-
         {statusMessage && (
           <p className="mt-2 text-xs text-gray-600">{statusMessage}</p>
         )}
       </div>
 
+      {/* CASE METADATA */}
       <div className="p-4 border-t border-gray-200">
         <h3 className="text-sm font-semibold text-gray-900 mb-3">
           Case Metadata
         </h3>
-
         <div className="space-y-2 text-xs text-gray-600">
-          <MetadataRow
-            label="Review ID:"
-            value={metadata?.review_id ?? "Loading..."}
-            mono
-          />
-          <MetadataRow
-            label="Submitted:"
-            value={metadata?.submitted ?? "Loading..."}
-          />
-          <MetadataRow
-            label="AI Confidence:"
-            value={metadata?.ai_confidence ?? "Loading..."}
-          />
-          <MetadataRow
-            label="Complexity:"
-            value={metadata?.complexity ?? "Loading..."}
-          />
-          <MetadataRow
-            label="Reviewer:"
-            value={metadata?.reviewer ?? "Loading..."}
-          />
+          <MetadataRow label="Review ID:" value={metadata?.review_id ?? "Loading..."} mono />
+          <MetadataRow label="Submitted:" value={metadata?.submitted ?? "Loading..."} />
+          <MetadataRow label="AI Confidence:" value={metadata?.ai_confidence ?? "Loading..."} />
+          <MetadataRow label="Complexity:" value={metadata?.complexity ?? "Loading..."} />
+          <MetadataRow label="Reviewer:" value={metadata?.reviewer ?? "Loading..."} />
         </div>
       </div>
     </div>
