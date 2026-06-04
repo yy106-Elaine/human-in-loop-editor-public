@@ -54,7 +54,7 @@ export default function App() {
         )}
       </div>
 
-      {/* Main layout: left tree | center+diff | right actions */}
+      {/* Main layout */}
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="h-full grid grid-cols-[280px_1fr_300px] grid-rows-[1fr_280px]">
           <div className="row-span-2 min-h-0 overflow-hidden">
@@ -66,7 +66,7 @@ export default function App() {
           </div>
 
           <div className="row-span-2 min-h-0 overflow-hidden">
-            <ReviewerActions context={context} apiConnected={connected} />
+            <ReviewerActions nodeId={selectedNodeId ?? ""} apiConnected={connected} />
           </div>
 
           <div className="min-h-0 overflow-hidden">
