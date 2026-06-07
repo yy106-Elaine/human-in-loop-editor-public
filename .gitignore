@@ -1,0 +1,12 @@
+# Node
+node_modules/
+ontology-review-frontend/node_modules/
+
+# Python
+.venv/
+ontology_backend_starter/.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
