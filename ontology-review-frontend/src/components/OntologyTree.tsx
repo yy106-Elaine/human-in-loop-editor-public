@@ -1,15 +1,33 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   ChevronRight,
   ChevronDown,
   Search,
 } from "lucide-react";
-import {
-  ONTOLOGY,
-  SUBONTOLOGIES,
-  type OntologyNode,
-  type NodeStatus,
-} from "./ontologyData";
+import { type OntologyNode, type NodeStatus } from "./ontologyData";
+
+const API_BASE = "http://127.0.0.1:8000";
+
+interface BackendNode {
+  id: string;
+  label: string;
+  code: string | null;
+  status: NodeStatus;
+  children: BackendNode[];
+}
+
+function toOntologyNode(n: BackendNode): OntologyNode {
+  return {
+    id: n.id,
+    label: n.label,
+    status: n.status,
+    synset: n.code ?? undefined,
+    children:
+      n.children && n.children.length
+        ? n.children.map(toOntologyNode)
+        : undefined,
+  };
+}
 
 interface TreeNodeProps {
   node: OntologyNode;
@@ -156,15 +174,52 @@ export function OntologyTree({
   );
   const [active, setActive] = useState<string>("physical"); // active subontology tab
   const [query, setQuery] = useState("");
+  
+  const [ontology, setOntology] = useState<Record<string, OntologyNode>>({});
+  const [subontologies, setSubontologies] = useState <
+    { id: string; label: string }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${API_BASE}/ontology/tree`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data: BackendNode[]) => {
+        if (cancelled) return;
+        const map: Record<string, OntologyNode> = {};
+        const tabs: { id: string; label: string }[] = [];
+        for (const sub of data) {
+          map[sub.id] = toOntologyNode(sub);
+          tabs.push({ id: sub.id, label: sub.label });
+        }
+        setOntology(map);
+        setSubontologies(tabs);
+        setActive((prev) => (map[prev] ? prev : tabs[0]?.id ?? ""));
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(String(err));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSelect = (id: string) => {
     setSelectedId(id);
     onNodeSelect(id);
   };
 
-  const root = ONTOLOGY[active];
+  const root = ontology[active];
   const { tree, expand } = useMemo(
-    () => filterTree(root, query),
+    () => (root ? filterTree(root, query) : { tree: null, expand: new Set<string>() }),
     [root, query],
   );
   const searching = query.trim().length > 0;
@@ -177,7 +232,7 @@ export function OntologyTree({
           Ontology Structure
         </h2>
         <div className="flex gap-1 mb-3">
-          {SUBONTOLOGIES.map((s) => (
+          {subontologies.map((s) => (
             <button
               key={s.id}
               onClick={() => {
@@ -210,7 +265,13 @@ export function OntologyTree({
 
       {/* Tree */}
       <div className="p-2 flex-1">
-        {tree && tree.children ? (
+        {loading ? (
+          <div className="text-xs text-gray-400 p-4">Loading…</div>
+        ) : error ? (
+          <div className="text-xs text-red-500 p-4">
+            Failed to load: {error}
+          </div>
+        ) : tree && tree.children ? (
           tree.children.map((node) => (
             <TreeNode
               key={node.id}
