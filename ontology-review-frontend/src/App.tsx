@@ -6,7 +6,7 @@ import { DiffSimulator } from "./components/DiffSimulator";
 import { getNodeContext } from "./components/ontologyLookup";
 
 export default function App() {
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>("school");
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [connected, setConnected] = useState(false);
 
@@ -62,7 +62,13 @@ export default function App() {
           </div>
 
           <div className="min-h-0 overflow-hidden">
-            <SemanticReview context={context} />
+            {selectedNodeId ? (
+              <SemanticReview nodeId={selectedNodeId} />
+            ) : (
+              <div className="h-full bg-white flex items-center justify-center text-sm text-gray-500">
+                Select a node from the tree to review.
+              </div>
+            )}
           </div>
 
           <div className="row-span-2 min-h-0 overflow-hidden">

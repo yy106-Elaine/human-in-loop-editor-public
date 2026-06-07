@@ -139,7 +139,8 @@ def get_tree() -> List[OntologyNode]:
 
 
 def find_node(node_id: str, nodes: List[OntologyNode] | None = None) -> OntologyNode | None:
-    nodes = nodes or ONTOLOGY_TREE
+    if nodes is None:
+        nodes = ONTOLOGY_TREE
     for node in nodes:
         if node.id == node_id:
             return node
