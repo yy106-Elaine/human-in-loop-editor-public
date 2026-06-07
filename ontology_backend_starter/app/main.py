@@ -159,7 +159,78 @@ def apply_action(node_id: str, body: ActionRequest):
             message="Rule candidate logged for future consistency checking.",
             node_id=node_id,
         )
+    if body.action_type == ReviewActionType.accept:
+        update_node_status(node_id, NodeStatus.approved)
+        return ActionResponse(
+            ok=True,
+            message="Accepted. Node marked as human-approved.",
+            node_id=node_id,
+            new_status=NodeStatus.approved,
+        )
 
+    if body.action_type == ReviewActionType.escalate:
+        update_node_status(node_id, NodeStatus.conflict)
+        return ActionResponse(
+            ok=True,
+            message="Case escalated for team review.",
+            node_id=node_id,
+            new_status=NodeStatus.conflict,
+        )
+
+    if body.action_type == ReviewActionType.rename:
+        new_label = body.payload.get("new_label")
+        if not new_label:
+            raise HTTPException(status_code=400, detail="rename requires payload.new_label")
+        return ActionResponse(
+            ok=True,
+            message=f"Rename request logged (new label: {new_label}).",
+            node_id=node_id,
+        )
+
+    if body.action_type == ReviewActionType.merge:
+        target = body.payload.get("target_node_id")
+        if not target:
+            raise HTTPException(status_code=400, detail="merge requires payload.target_node_id")
+        return ActionResponse(
+            ok=True,
+            message=f"Merge request logged with target node {target}.",
+            node_id=node_id,
+        )
+
+    if body.action_type == ReviewActionType.delete:
+        return ActionResponse(
+            ok=True,
+            message="Delete request logged. Production system should create a deletion proposal.",
+            node_id=node_id,
+        )
+
+    if body.action_type == ReviewActionType.add_parent:
+        parent = body.payload.get("parent_node_id")
+        if not parent:
+            raise HTTPException(status_code=400, detail="add_parent requires payload.parent_node_id")
+        return ActionResponse(
+            ok=True,
+            message=f"Add-parent request logged (parent: {parent}).",
+            node_id=node_id,
+        )
+
+    if body.action_type == ReviewActionType.place_elsewhere:
+        target = body.payload.get("target_parent_id")
+        if not target:
+            raise HTTPException(status_code=400, detail="place_elsewhere requires payload.target_parent_id")
+        return ActionResponse(
+            ok=True,
+            message=f"Move request logged (new parent: {target}).",
+            node_id=node_id,
+        )
+
+    if body.action_type == ReviewActionType.split:
+        return ActionResponse(
+            ok=True,
+            message="Split request logged. Production system should create a split proposal object.",
+            node_id=node_id,
+        )
+    
     raise HTTPException(status_code=400, detail="Unsupported action")
 
 

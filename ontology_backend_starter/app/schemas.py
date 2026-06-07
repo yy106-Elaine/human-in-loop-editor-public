@@ -20,6 +20,14 @@ class ReviewActionType(str, Enum):
     merge_nodes = "merge_nodes"
     escalate_case = "escalate_case"
     turn_into_rule = "turn_into_rule"
+    accept = "accept"
+    rename = "rename"
+    merge = "merge"
+    delete = "delete"
+    add_parent = "add_parent"
+    place_elsewhere = "place_elsewhere"
+    split = "split"
+    escalate = "escalate"
 
 
 class OntologyNode(BaseModel):

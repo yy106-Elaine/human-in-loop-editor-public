@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
 import {
   Check,
-  X,
-  GitBranch,
-  Split,
-  GitMerge,
+  Wrench,
   AlertTriangle,
-  BookOpen,
+  ChevronDown,
+  ChevronUp,
+  Pencil,
+  GitMerge,
+  Trash2,
+  CornerUpRight,
+  FolderInput,
+  GitBranch,
   Sparkles,
 } from "lucide-react";
 import {
   getCaseMetadata,
-  saveReviewerNotes,
   submitReviewerAction,
 } from "../api/ontologyApi";
 
@@ -24,7 +27,29 @@ interface CaseMetadata {
   notes?: string;
 }
 
-// Placeholder AI suggestions (static for now; live generation comes later).
+type Decision = "accept" | "action" | "escalate" | null;
+type ActionKind =
+  | "rename"
+  | "merge"
+  | "delete"
+  | "add_parent"
+  | "place_elsewhere"
+  | "split";
+
+//The six action options of Figma. The backendAction must correspond to the backend ReviewActionType.
+const ACTION_OPTIONS: {
+  kind: ActionKind;
+  label: string;
+  icon: React.ReactNode;
+}[] = [
+  { kind: "rename", label: "Rename", icon: <Pencil size={15} /> },
+  { kind: "merge", label: "Merge", icon: <GitMerge size={15} /> },
+  { kind: "delete", label: "Delete", icon: <Trash2 size={15} /> },
+  { kind: "add_parent", label: "Add Parent", icon: <CornerUpRight size={15} /> },
+  { kind: "place_elsewhere", label: "Place Elsewhere", icon: <FolderInput size={15} /> },
+  { kind: "split", label: "Split", icon: <GitBranch size={15} /> },
+];
+
 interface Suggestion {
   id: string;
   title: string;
@@ -71,25 +96,30 @@ export function ReviewerActions({
   nodeId: string;
   apiConnected?: boolean;
 }) {
-  const [notes, setNotes] = useState("");
   const [metadata, setMetadata] = useState<CaseMetadata | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
 
+  const [decision, setDecision] = useState<Decision>(null);
+  const [actionKind, setActionKind] = useState<ActionKind | null>(null);
+  const [comment, setComment] = useState("");
+
+  // When switching nodes, reset the form and re-fetch the metadata
   useEffect(() => {
+    setDecision(null);
+    setActionKind(null);
+    setComment("");
+    setStatusMessage("");
     getCaseMetadata(nodeId)
-      .then((data) => {
-        setMetadata(data);
-        setNotes(data.notes ?? "");
-      })
+      .then(setMetadata)
       .catch((err) => console.error("Failed to load metadata:", err));
   }, [nodeId]);
 
-  async function handleAction(actionType: string, payload = {}) {
+  async function submitToBackend(actionType: string, payload = {}) {
     try {
       const result = await submitReviewerAction(
         nodeId,
         actionType,
-        notes,
+        comment,
         payload
       );
       setStatusMessage(result.message ?? "Action submitted.");
@@ -99,15 +129,35 @@ export function ReviewerActions({
     }
   }
 
-  async function handleSaveNotes() {
-    try {
-      await saveReviewerNotes(nodeId, notes);
-      setStatusMessage("Notes saved.");
-    } catch (err) {
-      console.error(err);
-      setStatusMessage("Failed to save notes.");
-    }
+  function handleAccept() {
+    setDecision("accept");
+    setActionKind(null);
+    submitToBackend("accept");
   }
+
+  function handleEscalate() {
+    setDecision("escalate");
+    setActionKind(null);
+    //The submission of "escalate" is located in the "Submit" button below (a comment is required)
+  }
+
+  async function handleSubmitAction() {
+    if (!actionKind) return;
+    // Some actions require additional payloads. For now, we will use placeholder values. 
+    const payload: Record<string, string> = {};
+    if (actionKind === "rename") payload.new_label = comment || "(unspecified)";
+    if (actionKind === "merge") payload.target_node_id = "(unspecified)";
+    if (actionKind === "add_parent") payload.parent_node_id = "(unspecified)";
+    if (actionKind === "place_elsewhere") payload.target_parent_id = "(unspecified)";
+    await submitToBackend(actionKind, payload);
+  }
+
+  async function handleSubmitEscalation() {
+    await submitToBackend("escalate");
+  }
+
+  const baseBtn =
+    "w-full flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm font-medium transition-colors text-left";
 
   return (
     <div className="h-full bg-white border-l border-gray-200 overflow-y-auto">
@@ -128,21 +178,16 @@ export function ReviewerActions({
         </span>
       </div>
 
-      {/* AI SUGGESTIONS (your design) */}
+      {/* AI SUGGESTIONS */}
       <div className="p-4 border-b border-gray-200">
         <div className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-3">
           AI Suggestions
         </div>
         <div className="space-y-3">
           {PLACEHOLDER_SUGGESTIONS.map((s) => (
-            <div
-              key={s.id}
-              className="border border-gray-200 rounded-lg p-3.5"
-            >
+            <div key={s.id} className="border border-gray-200 rounded-lg p-3.5">
               <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium text-gray-900">
-                  {s.title}
-                </p>
+                <p className="text-sm font-medium text-gray-900">{s.title}</p>
                 <span className="text-[10px] text-gray-400 shrink-0 mt-0.5">
                   AI
                 </span>
@@ -162,92 +207,126 @@ export function ReviewerActions({
         </div>
       </div>
 
-      {/* REVIEWER ACTIONS (Sophia's full set, wired to backend) */}
+      {/* REVIEWER DECISION*/}
       <div className="p-4 space-y-2">
         <div className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-1">
-          Reviewer Actions
+          Reviewer Decision
         </div>
 
-        <ActionButton
-          icon={<Check size={16} />}
-          label="Approve Edit"
-          className="text-white bg-blue-600 hover:bg-blue-700"
-          onClick={() => handleAction("approve_edit")}
-        />
-
-        <ActionButton
-          icon={<X size={16} />}
-          label="Reject Edit"
-          className="text-gray-700 bg-gray-100 hover:bg-gray-200"
-          onClick={() => handleAction("reject_edit")}
-        />
-
-        <ActionButton
-          icon={<GitBranch size={16} />}
-          label="Add Multiple Inheritance"
-          className="text-gray-700 bg-purple-50 hover:bg-purple-100 border border-purple-200"
-          onClick={() => handleAction("add_multiple_inheritance")}
-        />
-
-        <ActionButton
-          icon={<Split size={16} />}
-          label="Split Node"
-          className="text-gray-700 bg-gray-100 hover:bg-gray-200"
-          onClick={() => handleAction("split_node")}
-        />
-
-        <ActionButton
-          icon={<GitMerge size={16} />}
-          label="Merge Nodes"
-          className="text-gray-700 bg-gray-100 hover:bg-gray-200"
-          onClick={() =>
-            handleAction("merge_nodes", {
-              target_node_id: "school-building",
-            })
-          }
-        />
-
-        <ActionButton
-          icon={<AlertTriangle size={16} />}
-          label="Escalate Case"
-          className="text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200"
-          onClick={() => handleAction("escalate_case")}
-        />
-
-        <ActionButton
-          icon={<BookOpen size={16} />}
-          label="Turn Into Rule"
-          className="text-gray-700 bg-blue-50 hover:bg-blue-100 border border-blue-200"
-          onClick={() =>
-            handleAction("turn_into_rule", {
-              rule_text:
-                "If a concept refers to both an institution and a building, consider multiple inheritance unless task context clearly favors one perspective.",
-            })
-          }
-        />
-      </div>
-
-      {/* REVIEWER NOTES */}
-      <div className="p-4 border-t border-gray-200 mt-4">
-        <h3 className="text-sm font-semibold text-gray-900 mb-2">
-          Reviewer Notes
-        </h3>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          className="w-full h-32 px-3 py-2 text-sm border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          placeholder="Add notes about this case..."
-        />
+        {/* Accept */}
         <button
-          onClick={handleSaveNotes}
-          className="w-full mt-2 px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+          onClick={handleAccept}
+          className={`${baseBtn} ${
+            decision === "accept"
+              ? "bg-gray-900 text-white"
+              : "bg-gray-100 text-gray-900 hover:bg-gray-200"
+          }`}
         >
-          Save Notes
+          <Check size={16} />
+          Accept
         </button>
-        {statusMessage && (
-          <p className="mt-2 text-xs text-gray-600">{statusMessage}</p>
+
+        {/* Action*/}
+        <button
+          onClick={() =>
+            setDecision((d) => (d === "action" ? null : "action"))
+          }
+          className={`${baseBtn} justify-between ${
+            decision === "action"
+              ? "bg-gray-200 text-gray-900"
+              : "bg-gray-100 text-gray-900 hover:bg-gray-200"
+          }`}
+        >
+          <span className="flex items-center gap-2.5">
+            <Wrench size={16} />
+            Action
+          </span>
+          {decision === "action" ? (
+            <ChevronUp size={15} />
+          ) : (
+            <ChevronDown size={15} />
+          )}
+        </button>
+
+        {decision === "action" && (
+          <div className="pt-1 pb-1 grid grid-cols-2 gap-2">
+            {ACTION_OPTIONS.map((opt) => (
+              <button
+                key={opt.kind}
+                onClick={() => setActionKind(opt.kind)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm border transition-colors ${
+                  actionKind === opt.kind
+                    ? "border-gray-900 bg-gray-50 text-gray-900"
+                    : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {opt.icon}
+                {opt.label}
+              </button>
+            ))}
+          </div>
         )}
+
+        {/* Escalate */}
+        <button
+          onClick={handleEscalate}
+          className={`${baseBtn} ${
+            decision === "escalate"
+              ? "border border-amber-300 bg-amber-50 text-amber-900"
+              : "bg-gray-100 text-gray-900 hover:bg-gray-200"
+          }`}
+        >
+          <AlertTriangle size={16} />
+          Escalate
+        </button>
       </div>
+
+      {/* COMMENT + Submit*/}
+      {(decision === "escalate" ||
+        (decision === "action" && actionKind)) && (
+        <div className="px-4 pb-2">
+          <div className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-2">
+            Comment
+            <span className="ml-1 normal-case text-gray-400">
+              — why this {decision === "escalate" ? "escalation" : "change"}?
+            </span>
+          </div>
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            rows={3}
+            placeholder={
+              decision === "escalate"
+                ? "Explain what needs discussion…"
+                : "Explain the reasoning for this change…"
+            }
+            className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-blue-500 resize-none"
+          />
+          <button
+            disabled={!comment.trim()}
+            onClick={
+              decision === "escalate"
+                ? handleSubmitEscalation
+                : handleSubmitAction
+            }
+            className="mt-2 w-full px-4 py-2.5 rounded-lg text-sm font-medium bg-gray-900 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-800"
+          >
+            Submit {decision === "escalate" ? "Escalation" : "Change"}
+          </button>
+        </div>
+      )}
+
+      {/* Accept */}
+      {decision === "accept" && (
+        <div className="px-4 pb-2 text-sm text-gray-600 flex items-center gap-2">
+          <Check size={15} className="text-gray-900" />
+          Marked as accepted.
+        </div>
+      )}
+
+      {statusMessage && (
+        <p className="px-4 pb-2 text-xs text-gray-600">{statusMessage}</p>
+      )}
 
       {/* CASE METADATA */}
       <div className="p-4 border-t border-gray-200">
@@ -263,28 +342,6 @@ export function ReviewerActions({
         </div>
       </div>
     </div>
-  );
-}
-
-function ActionButton({
-  icon,
-  label,
-  className,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  className: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`w-full flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${className}`}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }
 
