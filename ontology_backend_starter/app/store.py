@@ -1,4 +1,7 @@
+import json
+import re
 from copy import deepcopy
+from pathlib import Path
 from typing import Dict, List
 from app.schemas import (
     OntologyNode,
@@ -9,74 +12,101 @@ from app.schemas import (
     CaseMetadata,
 )
 
+DATA_DIR = Path(__file__).parent / "data"
 
-ONTOLOGY_TREE: List[OntologyNode] = [
-    OntologyNode(
-        id="actor",
-        label="Actor",
-        status=NodeStatus.none,
-        children=[
-            OntologyNode(
-                id="institution",
-                label="Institution",
-                status=NodeStatus.none,
-                children=[
-                    OntologyNode(id="school", label="School", code="school.n.01", status=NodeStatus.ambiguous),
-                    OntologyNode(id="hospital", label="Hospital", code="hospital.n.01", status=NodeStatus.approved),
-                ],
-            ),
-            OntologyNode(
-                id="professional",
-                label="Professional",
-                status=NodeStatus.none,
-                children=[
-                    OntologyNode(id="doctor", label="Doctor", code="doctor.n.01", status=NodeStatus.approved),
-                    OntologyNode(id="teacher", label="Teacher", code="teacher.n.01", status=NodeStatus.suggestion),
-                ],
-            ),
-        ],
-    ),
-    OntologyNode(
-        id="physical",
-        label="Physical",
-        status=NodeStatus.none,
-        children=[
-            OntologyNode(
-                id="building",
-                label="Building",
-                status=NodeStatus.none,
-                children=[
-                    OntologyNode(id="school-building", label="School", code="school.n.02", status=NodeStatus.inheritance),
-                    OntologyNode(id="library", label="Library", code="library.n.01", status=NodeStatus.approved),
-                ],
-            ),
-            OntologyNode(
-                id="artifact",
-                label="Artifact",
-                status=NodeStatus.none,
-                children=[OntologyNode(id="tool", label="Tool", code="tool.n.01", status=NodeStatus.approved)],
-            ),
-        ],
-    ),
-    OntologyNode(
-        id="information",
-        label="Information",
-        status=NodeStatus.none,
-        children=[
-            OntologyNode(id="record", label="Record", code="record.n.01", status=NodeStatus.approved),
-            OntologyNode(id="document", label="Document", code="document.n.01", status=NodeStatus.conflict),
-        ],
-    ),
-    OntologyNode(
-        id="activities",
-        label="Activities",
-        status=NodeStatus.none,
-        children=[
-            OntologyNode(id="education", label="Education", code="education.n.01", status=NodeStatus.approved),
-            OntologyNode(id="research", label="Research", code="research.n.01", status=NodeStatus.suggestion),
-        ],
-    ),
+# (frontend tab id, tab display label, filename) — filenames match those in data/
+SUBONTOLOGY_FILES = [
+    ("actor", "Actor", "actor-ontology-edited-042126.json"),
+    ("physical", "Physical", "physical-ontology-edited-042726.json"),
+    ("information", "Information", "info-ontology-edited-042726.json"),
+    ("activities", "Activities", "activity-ontology-edited-042126.json"),
 ]
+
+# Extract the first synset code from "research (research.n.01) - Research (...)"
+_SYNSET_RE = re.compile(r"\(([a-z_]+\.[nvasr]\.\d+)\)")
+
+
+def _parse_raw_name(raw: str) -> tuple[str, str | None]:
+    """raw looks like 'research (research.n.01) - Research (Research.v.01)'.
+    Returns (label, code): label = name before the first '(', code = first synset."""
+    m = _SYNSET_RE.search(raw)
+    code = m.group(1) if m else None
+    label = raw.split("(")[0].strip() if "(" in raw else raw.strip()
+    label = label.rstrip(" -").strip()
+    return (label or raw.strip(), code)
+
+
+def _make_id(raw: str, used: set) -> str:
+    """Generate a unique id: prefer the synset code, otherwise slugify the name."""
+    _, code = _parse_raw_name(raw)
+    base = code if code else re.sub(r"[^a-z0-9]+", "-", raw.lower()).strip("-")
+    base = base or "node"
+    candidate = base
+    i = 2
+    while candidate in used:
+        candidate = f"{base}-{i}"
+        i += 1
+    used.add(candidate)
+    return candidate
+
+
+def _build_nodes(raw_dict: dict, used: set) -> List[OntologyNode]:
+    """Recursively convert {name_string: {children}} into OntologyNode list. Empty {} = leaf."""
+    nodes: List[OntologyNode] = []
+    for raw_name, children_dict in raw_dict.items():
+        label, code = _parse_raw_name(raw_name)
+        node_id = _make_id(raw_name, used)
+        children = (
+            _build_nodes(children_dict, used)
+            if isinstance(children_dict, dict) and children_dict
+            else []
+        )
+        nodes.append(
+            OntologyNode(
+                id=node_id,
+                label=label,
+                code=code,
+                status=NodeStatus.none,  # default everything to none; reviewers change it later
+                children=children,
+            )
+        )
+    return nodes
+
+
+def _load_subontology(filename: str) -> dict:
+    """Read one JSON file, stripping the outer wrapper key (e.g. 'process') if present."""
+    path = DATA_DIR / filename
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if isinstance(data, dict) and len(data) == 1:
+        inner = next(iter(data.values()))
+        if isinstance(inner, dict):
+            return inner
+    return data
+
+
+def _build_full_tree() -> List[OntologyNode]:
+    """Assemble the four files into 4 top-level subontology nodes."""
+    roots: List[OntologyNode] = []
+    used: set = set()
+    for sub_id, sub_label, filename in SUBONTOLOGY_FILES:
+        try:
+            raw = _load_subontology(filename)
+        except FileNotFoundError:
+            continue  # skip missing files instead of crashing
+        roots.append(
+            OntologyNode(
+                id=sub_id,
+                label=sub_label,
+                code=None,
+                status=NodeStatus.none,
+                children=_build_nodes(raw, used),
+            )
+        )
+    return roots
+
+
+ONTOLOGY_TREE: List[OntologyNode] = _build_full_tree()
 
 SEMANTIC_REVIEWS: Dict[str, SemanticReview] = {
     "school": SemanticReview(
