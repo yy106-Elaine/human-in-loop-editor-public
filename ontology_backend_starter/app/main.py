@@ -1,3 +1,5 @@
+from pydantic import BaseModel
+from app.services.ai_suggestions import generate_ai_suggestions
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -237,3 +239,16 @@ def apply_action(node_id: str, body: ActionRequest):
 @app.get("/actions/log")
 def action_log():
     return ACTION_LOG
+
+class AISuggestionRequest(BaseModel):
+    api_key: str
+
+
+@app.post("/reviews/{node_id}/ai-suggestions")
+def ai_suggestions(node_id: str, body: AISuggestionRequest):
+    if not body.api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+    try:
+        return generate_ai_suggestions(node_id, body.api_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI suggestion failed: {e}")

@@ -99,3 +99,18 @@ export async function saveReviewerNotes(
 
   return res.json();
 }
+
+export async function getAISuggestions(nodeId: string, apiKey: string) {
+  const res = await fetch(
+    `${API_BASE}/reviews/${nodeId}/ai-suggestions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error("Failed to load AI suggestions");
+  }
+  return res.json();
+}

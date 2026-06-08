@@ -16,6 +16,7 @@ import {
 import {
   getCaseMetadata,
   submitReviewerAction,
+  getAISuggestions,
 } from "../api/ontologyApi";
 
 interface CaseMetadata {
@@ -51,7 +52,8 @@ const ACTION_OPTIONS: {
 ];
 
 interface Suggestion {
-  id: string;
+  id?: string;
+  type?: string;
   title: string;
   body: string;
   confidence: number;
@@ -92,9 +94,11 @@ function ConfidenceBar({ value }: { value: number }) {
 export function ReviewerActions({
   nodeId,
   apiConnected = false,
+  apiKey = "",
 }: {
   nodeId: string;
   apiConnected?: boolean;
+  apiKey?: string;
 }) {
   const [metadata, setMetadata] = useState<CaseMetadata | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -102,6 +106,8 @@ export function ReviewerActions({
   const [decision, setDecision] = useState<Decision>(null);
   const [actionKind, setActionKind] = useState<ActionKind | null>(null);
   const [comment, setComment] = useState("");
+  const [aiSuggestions, setAiSuggestions] = useState<Suggestion[] | null>(null);
+  const [loadingAI, setLoadingAI] = useState(false);
 
   // When switching nodes, reset the form and re-fetch the metadata
   useEffect(() => {
@@ -112,7 +118,22 @@ export function ReviewerActions({
     getCaseMetadata(nodeId)
       .then(setMetadata)
       .catch((err) => console.error("Failed to load metadata:", err));
-  }, [nodeId]);
+
+    // If connected, fetch real AI suggestions; otherwise clear them.
+    if (apiConnected && apiKey) {
+      setLoadingAI(true);
+      setAiSuggestions(null);
+      getAISuggestions(nodeId, apiKey)
+        .then((data) => setAiSuggestions(data.suggestions ?? []))
+        .catch((err) => {
+          console.error("Failed to load AI suggestions:", err);
+          setAiSuggestions([]);
+        })
+        .finally(() => setLoadingAI(false));
+    } else {
+      setAiSuggestions(null);
+    }
+  }, [nodeId, apiConnected, apiKey]);
 
   async function submitToBackend(actionType: string, payload = {}) {
     try {
@@ -184,25 +205,44 @@ export function ReviewerActions({
           AI Suggestions
         </div>
         <div className="space-y-3">
-          {PLACEHOLDER_SUGGESTIONS.map((s) => (
-            <div key={s.id} className="border border-gray-200 rounded-lg p-3.5">
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium text-gray-900">{s.title}</p>
-                <span className="text-[10px] text-gray-400 shrink-0 mt-0.5">
-                  AI
-                </span>
-              </div>
-              <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">
-                {s.body}
-              </p>
-              <ConfidenceBar value={s.confidence} />
-            </div>
-          ))}
-          {!apiConnected && (
+          {loadingAI ? (
             <p className="text-[11px] text-gray-400 italic">
-              Showing sample suggestions. Connect an Anthropic API key to
-              generate live ones.
+              Generating live AI suggestions…
             </p>
+          ) : aiSuggestions !== null ? (
+            aiSuggestions.length === 0 ? (
+              <p className="text-[11px] text-gray-400 italic">
+                No issues detected for this node.
+              </p>
+            ) : (
+              aiSuggestions.map((s, idx) => (
+                <div key={idx} className="border border-gray-200 rounded-lg p-3.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-900">{s.title}</p>
+                    <span className="text-[10px] text-gray-400 shrink-0 mt-0.5">AI</span>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">{s.body}</p>
+                  <ConfidenceBar value={s.confidence} />
+                </div>
+              ))
+            )
+          ) : (
+            <>
+              {PLACEHOLDER_SUGGESTIONS.map((s) => (
+                <div key={s.id} className="border border-gray-200 rounded-lg p-3.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-900">{s.title}</p>
+                    <span className="text-[10px] text-gray-400 shrink-0 mt-0.5">AI</span>
+                  </div>
+                  <p className="text-sm text-gray-600 mt-1.5 leading-relaxed">{s.body}</p>
+                  <ConfidenceBar value={s.confidence} />
+                </div>
+              ))}
+              <p className="text-[11px] text-gray-400 italic">
+                Showing sample suggestions. Connect an Anthropic API key to
+                generate live ones.
+              </p>
+            </>
           )}
         </div>
       </div>

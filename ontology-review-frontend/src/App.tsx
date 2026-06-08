@@ -72,11 +72,15 @@ export default function App() {
           </div>
 
           <div className="row-span-2 min-h-0 overflow-hidden">
-            <ReviewerActions nodeId={selectedNodeId ?? ""} apiConnected={connected} />
+            <ReviewerActions
+            nodeId={selectedNodeId ?? ""}
+            apiConnected={connected}
+            apiKey={apiKey}
+          />
           </div>
 
           <div className="min-h-0 overflow-hidden">
-            <DiffSimulator context={context} />
+            <DiffSimulator nodeId={selectedNodeId ?? ""} />
           </div>
         </div>
       </div>
