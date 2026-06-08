@@ -12,6 +12,38 @@ interface LogEntry {
   payload?: Record<string, unknown>;
 }
 
+const ACTION_LABELS: Record<string, string> = {
+  accept: "Accepted",
+  rename: "Renamed",
+  merge: "Merged",
+  delete: "Deleted",
+  add_parent: "Added parent",
+  place_elsewhere: "Moved",
+  split: "Split",
+  escalate: "Escalated",
+  ai_suggestion_approve: "Approved AI suggestion",
+  ai_suggestion_reject: "Rejected AI suggestion",
+};
+
+function prettyAction(raw: string): string {
+  return (
+    ACTION_LABELS[raw] ??
+    raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+  );
+}
+
+// Pull a short human-readable summary out of the payload, instead of dumping JSON.
+function payloadSummary(payload?: Record<string, unknown>): string | null {
+  if (!payload) return null;
+  const p = payload as Record<string, unknown>;
+  if (typeof p.suggestion_title === "string") return p.suggestion_title;
+  if (typeof p.new_label === "string") return `→ "${p.new_label}"`;
+  if (typeof p.target_node_id === "string") return `with ${p.target_node_id}`;
+  if (typeof p.parent_node_id === "string") return `under ${p.parent_node_id}`;
+  if (typeof p.target_parent_id === "string") return `to ${p.target_parent_id}`;
+  return null;
+}
+
 export function ActionLog({
   nodeId,
   refreshKey,
@@ -63,23 +95,36 @@ export function ActionLog({
           entries.map((entry, idx) => (
             <div key={entry.id ?? idx} className="border border-gray-200 rounded-lg p-2.5">
               <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-semibold text-gray-900">{entry.action_type}</p>
-                  <p className="text-[11px] text-gray-500">{entry.node_id}</p>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-gray-900">
+                    {prettyAction(entry.action_type)}
+                  </p>
+                  <p className="text-[11px] text-gray-500 font-mono truncate">
+                    {entry.node_id}
+                  </p>
                 </div>
-                <span className="text-[10px] text-gray-400 text-right">
-                  {entry.timestamp ? new Date(entry.timestamp).toLocaleString() : ""}
+                <span className="text-[10px] text-gray-400 text-right shrink-0">
+                  {entry.timestamp
+                    ? new Date(entry.timestamp).toLocaleString([], {
+                        month: "short",
+                        day: "numeric",
+                        hour: "numeric",
+                        minute: "2-digit",
+                      })
+                    : ""}
                 </span>
               </div>
 
-              {entry.notes && (
-                <p className="text-xs text-gray-600 mt-1.5 line-clamp-3">{entry.notes}</p>
+              {payloadSummary(entry.payload) && (
+                <p className="text-xs text-gray-700 mt-1.5 line-clamp-2">
+                  {payloadSummary(entry.payload)}
+                </p>
               )}
 
-              {entry.payload && Object.keys(entry.payload).length > 0 && (
-                <pre className="mt-1.5 text-[10px] bg-gray-50 rounded p-1.5 overflow-x-auto text-gray-500">
-                  {JSON.stringify(entry.payload, null, 2)}
-                </pre>
+              {entry.notes && (
+                <p className="text-[11px] text-gray-500 mt-1 line-clamp-3 italic">
+                  “{entry.notes}”
+                </p>
               )}
             </div>
           ))

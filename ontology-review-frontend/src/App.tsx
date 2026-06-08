@@ -11,6 +11,7 @@ export default function App() {
   const [apiKey, setApiKey] = useState("");
   const [connected, setConnected] = useState(false);
   const [logRefreshKey, setLogRefreshKey] = useState(0);
+  const [centerTab, setCenterTab] = useState<"semantic" | "diff" | "log">("semantic");
 
   function handleActionComplete() {
     setLogRefreshKey((v) => v + 1);
@@ -57,33 +58,72 @@ export default function App() {
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        <div className="h-full grid grid-cols-[280px_1fr_360px] grid-rows-[minmax(0,1fr)_320px]">
-          <div className="row-span-2 min-h-0 overflow-hidden">
+        <div className="h-full grid grid-cols-[280px_1fr_360px] grid-rows-[minmax(0,1fr)]">
+          {/* LEFT: ontology tree */}
+          <div className="min-h-0 overflow-hidden">
             <OntologyTree onNodeSelect={setSelectedNodeId} />
           </div>
 
-          <div className="min-h-0 overflow-hidden">
-            {selectedNodeId ? (
-              <SemanticReview nodeId={selectedNodeId} />
-            ) : (
-              <div className="h-full bg-white flex items-center justify-center text-sm text-gray-500">
-                Select a node from the tree or lookup bar to review.
-              </div>
-            )}
+          {/* CENTER: tabbed panel (Semantic Review / Diff Simulator) */}
+          <div className="min-h-0 overflow-hidden flex flex-col bg-white border-l border-gray-200">
+            {/* Tab bar */}
+            <div className="shrink-0 flex border-b border-gray-200">
+              <button
+                onClick={() => setCenterTab("semantic")}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  centerTab === "semantic"
+                    ? "border-gray-900 text-gray-900"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Semantic Review
+              </button>
+              <button
+                onClick={() => setCenterTab("diff")}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  centerTab === "diff"
+                    ? "border-gray-900 text-gray-900"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Diff Simulator
+              </button>
+              <button
+                onClick={() => setCenterTab("log")}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  centerTab === "log"
+                    ? "border-gray-900 text-gray-900"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Review Log
+              </button>
+            </div>
+
+            {/* Tab content */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {centerTab === "log" ? (
+                <ActionLog nodeId={selectedNodeId} refreshKey={logRefreshKey} />
+              ) : !selectedNodeId ? (
+                <div className="h-full flex items-center justify-center text-sm text-gray-500">
+                  Select a node from the tree or lookup bar to review.
+                </div>
+              ) : centerTab === "semantic" ? (
+                <SemanticReview nodeId={selectedNodeId} />
+              ) : (
+                <DiffSimulator nodeId={selectedNodeId} />
+              )}
+            </div>
           </div>
 
-          <div className="row-span-2 min-h-0 overflow-hidden grid grid-rows-[minmax(0,1fr)_300px]">
+          {/* RIGHT: reviewer actions */}
+          <div className="min-h-0 overflow-hidden">
             <ReviewerActions
               nodeId={selectedNodeId ?? ""}
               apiConnected={connected}
               apiKey={apiKey}
               onActionComplete={handleActionComplete}
             />
-            <ActionLog nodeId={selectedNodeId} refreshKey={logRefreshKey} />
-          </div>
-
-          <div className="min-h-0 overflow-hidden">
-            <DiffSimulator nodeId={selectedNodeId ?? ""} />
           </div>
         </div>
       </div>
