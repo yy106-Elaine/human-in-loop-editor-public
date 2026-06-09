@@ -5,13 +5,17 @@ import { ReviewerActions } from "./components/ReviewerActions";
 import { DiffSimulator } from "./components/DiffSimulator";
 import { ActionLog } from "./components/ActionLog";
 import { NodeLookup } from "./components/NodeLookup";
+import { EditPatternsPage } from "./components/EditPatternsPage";
+import { PrinciplesPage } from "./components/PrinciplesPage";
 
 export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [connected, setConnected] = useState(false);
   const [logRefreshKey, setLogRefreshKey] = useState(0);
-  const [centerTab, setCenterTab] = useState<"semantic" | "diff" | "log">("semantic");
+  const [centerTab, setCenterTab] = useState<
+    "semantic" | "diff" | "log" | "patterns" | "principles"
+  >("semantic");
 
   function handleActionComplete() {
     setLogRefreshKey((v) => v + 1);
@@ -59,18 +63,15 @@ export default function App() {
 
       <div className="flex-1 min-h-0 overflow-hidden">
         <div className="h-full grid grid-cols-[280px_1fr_360px] grid-rows-[minmax(0,1fr)]">
-          {/* LEFT: ontology tree */}
           <div className="min-h-0 overflow-hidden">
             <OntologyTree onNodeSelect={setSelectedNodeId} />
           </div>
 
-          {/* CENTER: tabbed panel (Semantic Review / Diff Simulator) */}
           <div className="min-h-0 overflow-hidden flex flex-col bg-white border-l border-gray-200">
-            {/* Tab bar */}
-            <div className="shrink-0 flex border-b border-gray-200">
+            <div className="shrink-0 flex border-b border-gray-200 overflow-x-auto">
               <button
                 onClick={() => setCenterTab("semantic")}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                   centerTab === "semantic"
                     ? "border-gray-900 text-gray-900"
                     : "border-transparent text-gray-500 hover:text-gray-700"
@@ -78,9 +79,10 @@ export default function App() {
               >
                 Semantic Review
               </button>
+
               <button
                 onClick={() => setCenterTab("diff")}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                   centerTab === "diff"
                     ? "border-gray-900 text-gray-900"
                     : "border-transparent text-gray-500 hover:text-gray-700"
@@ -88,9 +90,10 @@ export default function App() {
               >
                 Diff Simulator
               </button>
+
               <button
                 onClick={() => setCenterTab("log")}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
                   centerTab === "log"
                     ? "border-gray-900 text-gray-900"
                     : "border-transparent text-gray-500 hover:text-gray-700"
@@ -98,12 +101,37 @@ export default function App() {
               >
                 Review Log
               </button>
+
+              <button
+                onClick={() => setCenterTab("patterns")}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                  centerTab === "patterns"
+                    ? "border-gray-900 text-gray-900"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Edit Patterns
+              </button>
+
+              <button
+                onClick={() => setCenterTab("principles")}
+                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
+                  centerTab === "principles"
+                    ? "border-gray-900 text-gray-900"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                Principles
+              </button>
             </div>
 
-            {/* Tab content */}
             <div className="flex-1 min-h-0 overflow-hidden">
               {centerTab === "log" ? (
                 <ActionLog nodeId={selectedNodeId} refreshKey={logRefreshKey} />
+              ) : centerTab === "patterns" ? (
+                <EditPatternsPage onActionComplete={handleActionComplete} />
+              ) : centerTab === "principles" ? (
+                <PrinciplesPage />
               ) : !selectedNodeId ? (
                 <div className="h-full flex items-center justify-center text-sm text-gray-500">
                   Select a node from the tree or lookup bar to review.
@@ -116,7 +144,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* RIGHT: reviewer actions */}
           <div className="min-h-0 overflow-hidden">
             <ReviewerActions
               nodeId={selectedNodeId ?? ""}

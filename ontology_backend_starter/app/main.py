@@ -6,6 +6,12 @@ from pydantic import BaseModel
 from app.services.ai_suggestions import generate_ai_suggestions
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.edit_patterns import (
+    detect_duplicate_patterns,
+    detect_virtual_node_patterns,
+    detect_all_edit_patterns,
+    get_node_pattern_context,
+)
 
 from app.schemas import (
     ActionRequest,
@@ -40,6 +46,33 @@ app.add_middleware(
 # In-memory MVP stores. These are safe for prototyping.
 # Later: move these to SQLite/Postgres.
 AI_SUGGESTION_STORE: Dict[str, List[Dict[str, Any]]] = {}
+
+# In-memory stores for edit-pattern demo decisions and shared principles.
+# Later: move these to SQLite/Postgres alongside ACTION_LOG.
+PATTERN_DECISIONS: List[Dict[str, Any]] = []
+PRINCIPLES: List[Dict[str, Any]] = [
+    {
+        "id": "principle-duplicate-sense",
+        "title": "Same label does not always mean same concept",
+        "body": (
+            "When two nodes share a label but have different synsets or different inheritance paths, "
+            "reviewers should decide whether the label reflects duplicate concepts or distinct senses "
+            "that need clearer names."
+        ),
+        "source": "initial",
+        "examples": [],
+    },
+    {
+        "id": "principle-virtual-utility",
+        "title": "Virtual nodes should contribute inheritance value",
+        "body": (
+            "A virtual node should be kept when it organizes multiple children or captures a reusable abstraction. "
+            "It should be altered or removed when it adds little structure or obscures meaning."
+        ),
+        "source": "initial",
+        "examples": [],
+    },
+]
 
 
 def now_iso() -> str:
@@ -84,6 +117,15 @@ def flatten_tree(nodes, parent_path=None) -> List[Dict[str, Any]]:
         )
         rows.extend(flatten_tree(node.children or [], path))
     return rows
+
+
+class PatternDecisionRequest(BaseModel):
+    decision: str  # approve | alter | reject
+    reviewer: Optional[str] = "Sophia"
+    comment: Optional[str] = ""
+    altered_action: Optional[str] = None
+    principle_update: Optional[str] = None
+    payload: Dict[str, Any] = {}
 
 
 @app.get("/health")
@@ -393,3 +435,118 @@ def decide_ai_suggestion(node_id: str, suggestion_id: str, body: AISuggestionDec
         "suggestion": suggestion,
         "message": f"AI suggestion {decision}ed and logged.",
     }
+
+
+# -----------------------------------------------------------------------------
+# Edit-pattern demo routes
+# -----------------------------------------------------------------------------
+@app.get("/edit-patterns")
+def edit_patterns():
+    """Return all detected edit-pattern suggestions for the demo page."""
+    return detect_all_edit_patterns()
+
+
+@app.get("/edit-patterns/duplicates")
+def duplicate_edit_patterns():
+    """Detect duplicate labels / duplicate-sense edit patterns."""
+    return detect_duplicate_patterns()
+
+
+@app.get("/edit-patterns/virtual")
+def virtual_edit_patterns():
+    """Detect virtual node keep / alter / remove edit patterns."""
+    return detect_virtual_node_patterns()
+
+
+@app.get("/reviews/{node_id}/patterns")
+def node_edit_patterns(node_id: str):
+    """Return duplicate/virtual edit-pattern context for one selected node."""
+    return get_node_pattern_context(node_id)
+
+
+@app.post("/edit-patterns/{pattern_id:path}/decision")
+def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
+    """
+    Store a human decision on an edit-pattern suggestion.
+
+    This records whether the reviewer approved, rejected, or altered the suggested
+    edit. If the reviewer writes a principle update, the backend also records a
+    new shared principle linked to this concrete example.
+    """
+    decision = body.decision.lower().strip()
+    if decision not in {"approve", "alter", "reject"}:
+        raise HTTPException(status_code=400, detail="decision must be approve, alter, or reject")
+
+    record = {
+        "id": f"pattern-decision-{len(PATTERN_DECISIONS) + 1}",
+        "pattern_id": pattern_id,
+        "decision": decision,
+        "reviewer": body.reviewer or "Unassigned",
+        "comment": body.comment or "",
+        "altered_action": body.altered_action,
+        "payload": body.payload or {},
+        "created_at": now_iso(),
+    }
+    PATTERN_DECISIONS.append(record)
+
+    log_event(
+        node_id=pattern_id,
+        action_type=f"edit_pattern_{decision}",
+        reviewer=body.reviewer,
+        notes=body.comment,
+        payload={
+            "altered_action": body.altered_action,
+            "principle_update": body.principle_update,
+            **(body.payload or {}),
+        },
+    )
+
+    if body.principle_update and body.principle_update.strip():
+        principle = {
+            "id": f"principle-{len(PRINCIPLES) + 1}",
+            "title": "Human-updated editing principle",
+            "body": body.principle_update.strip(),
+            "source": "human_review",
+            "examples": [pattern_id],
+            "created_at": record["created_at"],
+        }
+        PRINCIPLES.append(principle)
+        record["principle_added"] = principle
+
+    return {
+        "ok": True,
+        "message": f"Stored {decision} decision for {pattern_id}.",
+        "record": record,
+    }
+
+
+@app.get("/edit-pattern-decisions")
+def edit_pattern_decisions():
+    """Return stored human decisions on edit-pattern suggestions."""
+    return {"decisions": PATTERN_DECISIONS}
+
+
+@app.get("/principles")
+def get_principles():
+    """Return shared editing principles, including human-updated ones."""
+    return {"principles": PRINCIPLES}
+
+
+@app.post("/principles")
+def add_principle(body: PatternDecisionRequest):
+    """Manually add a shared editing principle."""
+    text = (body.principle_update or body.comment or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="principle_update or comment is required")
+
+    principle = {
+        "id": f"principle-{len(PRINCIPLES) + 1}",
+        "title": "Human-added principle",
+        "body": text,
+        "source": "manual",
+        "examples": [],
+        "created_at": now_iso(),
+    }
+    PRINCIPLES.append(principle)
+    return {"ok": True, "principle": principle}
+

@@ -1,0 +1,222 @@
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+from app.store import ONTOLOGY_TREE, find_node
+
+
+@dataclass
+class FlatNode:
+    id: str
+    label: str
+    code: Optional[str]
+    status: str
+    parent_id: Optional[str]
+    parent_label: Optional[str]
+    path: List[str]
+    children_count: int
+    is_virtual: bool
+
+
+def _node_status(node: Any) -> str:
+    status = getattr(node, "status", "none")
+    return getattr(status, "value", str(status))
+
+
+def _is_virtual_node(node: Any) -> bool:
+    label = (getattr(node, "label", "") or "").strip()
+    node_id = (getattr(node, "id", "") or "").strip()
+    if label.startswith("[virtual]"):
+        return True
+    if node_id.startswith("virtual-") or "-virtual-" in node_id:
+        return True
+    if "virtual" in label.lower():
+        return True
+    return False
+
+
+def flatten_ontology() -> List[FlatNode]:
+    flat: List[FlatNode] = []
+
+    def walk(nodes: List[Any], parent: Optional[Any], path: List[str]) -> None:
+        for n in nodes:
+            label = getattr(n, "label", "")
+            node_id = getattr(n, "id", "")
+            code = getattr(n, "code", None)
+            children = getattr(n, "children", []) or []
+            current_path = [*path, label]
+            flat.append(
+                FlatNode(
+                    id=node_id,
+                    label=label,
+                    code=code,
+                    status=_node_status(n),
+                    parent_id=getattr(parent, "id", None) if parent else None,
+                    parent_label=getattr(parent, "label", None) if parent else None,
+                    path=current_path,
+                    children_count=len(children),
+                    is_virtual=_is_virtual_node(n),
+                )
+            )
+            walk(children, n, current_path)
+
+    walk(ONTOLOGY_TREE, None, [])
+    return flat
+
+
+def _norm_label(label: str) -> str:
+    return label.replace("_", " ").replace("-", " ").replace("[virtual]", "").strip().lower()
+
+
+def detect_duplicate_patterns() -> Dict[str, Any]:
+    flat = flatten_ontology()
+    groups: Dict[str, List[FlatNode]] = defaultdict(list)
+
+    for node in flat:
+        if node.label:
+            groups[_norm_label(node.label)].append(node)
+
+    suggestions: List[Dict[str, Any]] = []
+    for label_key, nodes in groups.items():
+        if len(nodes) < 2:
+            continue
+
+        synsets = sorted({n.code for n in nodes if n.code})
+        if len(synsets) <= 1:
+            suggested_action = "merge"
+            rationale = (
+                "These nodes share the same label and appear to have the same or missing synset. "
+                "They may represent duplicate concepts unless their paths imply distinct ontology roles."
+            )
+            confidence = 0.90
+        else:
+            suggested_action = "keep_separate_rename"
+            rationale = (
+                "These nodes share the same label but use different synsets. They should likely be kept separate, "
+                "but renamed or disambiguated so reviewers can see which sense is intended."
+            )
+            confidence = 0.75
+
+        suggestions.append(
+            {
+                "id": f"duplicate::{label_key}",
+                "pattern_type": "duplicate",
+                "label": nodes[0].label,
+                "title": f"Duplicate label: {nodes[0].label}",
+                "suggested_action": suggested_action,
+                "rationale": rationale,
+                "confidence": confidence,
+                "nodes": [
+                    {
+                        "id": n.id,
+                        "label": n.label,
+                        "code": n.code,
+                        "parent_label": n.parent_label,
+                        "path": " → ".join(n.path),
+                    }
+                    for n in nodes
+                ],
+                "synsets": synsets,
+            }
+        )
+
+    suggestions.sort(key=lambda x: (-x["confidence"], x["label"]))
+    return {"pattern_type": "duplicate", "count": len(suggestions), "suggestions": suggestions}
+
+
+def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
+    label = node.label
+    normalized = _norm_label(label)
+    vague_terms = {"thing", "entity", "object", "whole", "part", "group", "set", "unit", "body"}
+
+    if node.children_count >= 3:
+        action = "keep"
+        confidence = 0.82
+        rationale = (
+            "This virtual/abstract node groups several children and likely helps preserve inheritance structure. "
+            "It should probably be kept unless reviewers find the abstraction misleading."
+        )
+    elif node.children_count == 1:
+        action = "alter"
+        confidence = 0.72
+        rationale = (
+            "This virtual/abstract node has only one child, so it may not be doing enough organizational work. "
+            "Consider merging it with the child or renaming it to clarify the abstraction."
+        )
+    elif normalized in vague_terms or not node.code:
+        action = "alter"
+        confidence = 0.68
+        rationale = (
+            "This virtual/abstract node has a broad or underspecified label. It may be useful, but reviewers should "
+            "clarify what inheritance property it contributes."
+        )
+    else:
+        action = "remove"
+        confidence = 0.61
+        rationale = (
+            "This virtual/abstract node has no children in the current loaded structure, so it may not currently "
+            "contribute useful inheritance organization."
+        )
+
+    return {
+        "id": f"virtual::{node.id}",
+        "pattern_type": "virtual",
+        "node_id": node.id,
+        "label": node.label,
+        "code": node.code,
+        "parent_label": node.parent_label,
+        "path": " → ".join(node.path),
+        "children_count": node.children_count,
+        "suggested_action": action,
+        "title": f"Virtual node: {node.label}",
+        "rationale": rationale,
+        "confidence": confidence,
+    }
+
+
+def detect_virtual_node_patterns(limit: int = 75) -> Dict[str, Any]:
+    flat = flatten_ontology()
+    candidates = [n for n in flat if n.is_virtual]
+
+    # Fallback because some JSON parsers strip "[virtual]" from labels.
+    if not candidates:
+        candidates = [n for n in flat if not n.code and n.children_count > 0]
+
+    suggestions = [_virtual_suggestion(n) for n in candidates]
+    suggestions.sort(key=lambda x: (-x["confidence"], x["label"]))
+    return {"pattern_type": "virtual", "count": len(suggestions), "suggestions": suggestions[:limit]}
+
+
+def detect_all_edit_patterns() -> Dict[str, Any]:
+    duplicates = detect_duplicate_patterns()
+    virtuals = detect_virtual_node_patterns()
+    return {
+        "duplicate": duplicates,
+        "virtual": virtuals,
+        "summary": {
+            "duplicate_count": duplicates["count"],
+            "virtual_count": virtuals["count"],
+        },
+    }
+
+
+def get_node_pattern_context(node_id: str) -> Dict[str, Any]:
+    node = find_node(node_id)
+    if not node:
+        return {"node_id": node_id, "patterns": []}
+
+    flat = flatten_ontology()
+    current = next((n for n in flat if n.id == node_id), None)
+    patterns = []
+
+    if current:
+        for d in detect_duplicate_patterns()["suggestions"]:
+            if any(n["id"] == node_id for n in d["nodes"]):
+                patterns.append(d)
+
+        if current.is_virtual or (not current.code and current.children_count > 0):
+            patterns.append(_virtual_suggestion(current))
+
+    return {"node_id": node_id, "patterns": patterns}
