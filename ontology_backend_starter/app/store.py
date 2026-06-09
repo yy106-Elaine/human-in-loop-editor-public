@@ -1,5 +1,6 @@
 import json
 import re
+from nltk.corpus import wordnet as wn
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
@@ -185,6 +186,39 @@ def update_node_status(node_id: str, status: NodeStatus) -> None:
     if node:
         node.status = status
 
+def _wordnet_definition(code: str | None) -> str:
+    """Look up a WordNet gloss from a synset code like 'school.n.01'.
+    Returns a friendly fallback if the code is missing or not found."""
+    if not code:
+        return "No WordNet synset associated with this node."
+    try:
+        synset = wn.synset(code)
+    except Exception:
+        return f"No WordNet entry found for '{code}'."
+    definition = synset.definition()
+    examples = synset.examples()
+    if examples:
+        # append the first example sentence in quotes, like the school sample did
+        return f'{definition}: "{examples[0]}"'
+    return definition
+
+
+def _find_parents(node_id: str) -> list[str]:
+    """Walk the ontology tree to build the parent path for a node,
+    e.g. ['Physical', 'artifact', 'instrumentality']."""
+    path: list[str] = []
+
+    def walk(nodes: List[OntologyNode], trail: List[str]) -> bool:
+        for n in nodes:
+            if n.id == node_id:
+                path.extend(trail)
+                return True
+            if walk(n.children, trail + [n.label]):
+                return True
+        return False
+
+    walk(ONTOLOGY_TREE, [])
+    return path
 
 def get_semantic_review(node_id: str) -> SemanticReview:
     if node_id in SEMANTIC_REVIEWS:
@@ -194,14 +228,17 @@ def get_semantic_review(node_id: str) -> SemanticReview:
     label = node.label if node else node_id
     code = node.code if node else None
 
+    parents = _find_parents(node_id)
+    parent_path = [" → ".join(parents)] if parents else []
+
     return SemanticReview(
         node_id=node_id,
         label=label,
         code=code,
         semantic_tension_detected=False,
         tension_explanation="No semantic tension has been detected for this node.",
-        wordnet_definition="Definition unavailable in prototype data.",
-        current_parents=[],
+        wordnet_definition=_wordnet_definition(code),
+        current_parents=parent_path,
         perspective_confidence=[],
         onet_task_examples=[],
         similar_reviewed_cases=[],

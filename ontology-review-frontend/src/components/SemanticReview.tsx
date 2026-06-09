@@ -91,45 +91,6 @@ export function SemanticReview({ nodeId }: { nodeId: string }) {
           </div>
         </Section>
 
-        <Section title="Perspective Confidence">
-          <div className="border border-gray-200 rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr>
-                  <th className="text-left px-4 py-2.5 font-medium text-gray-700">
-                    Perspective
-                  </th>
-                  <th className="text-left px-4 py-2.5 font-medium text-gray-700">
-                    Confidence
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {review.perspective_confidence.map((row) => (
-                  <tr key={row.perspective} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5 text-gray-900">
-                      {row.perspective}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 bg-gray-200 h-2 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-blue-500 rounded-full"
-                            style={{ width: `${row.confidence * 100}%` }}
-                          />
-                        </div>
-                        <span className="text-gray-700 font-medium min-w-[3rem]">
-                          {(row.confidence * 100).toFixed(0)}%
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Section>
-
         <Section title="O*NET Task Examples">
           <div className="space-y-2">
             {review.onet_task_examples.map((example, idx) => (
@@ -161,17 +122,6 @@ export function SemanticReview({ nodeId }: { nodeId: string }) {
                 <p className="text-xs text-gray-600">{caseItem.resolution}</p>
               </div>
             ))}
-          </div>
-        </Section>
-
-        <Section title="AI Explanation">
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-sm text-gray-700 leading-relaxed">
-              {review.ai_explanation}
-            </p>
-            <p className="mt-3 text-sm text-gray-700">
-              <strong>Recommendation:</strong> {review.recommendation}
-            </p>
           </div>
         </Section>
       </div>
