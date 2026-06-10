@@ -125,6 +125,7 @@ interface ReviewerActionsProps {
   apiConnected?: boolean;
   apiKey?: string;
   onActionComplete?: () => void;
+  onActionChange?: (actionType: string, payload: Record<string, unknown>) => void;
 }
 
 function ConfidenceBar({ value }: { value: number }) {
@@ -147,6 +148,7 @@ export function ReviewerActions({
   apiConnected = false,
   apiKey = "",
   onActionComplete,
+  onActionChange,
 }: ReviewerActionsProps) {
   const [metadata, setMetadata] = useState<CaseMetadata | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
@@ -206,6 +208,22 @@ export function ReviewerActions({
       setStatusMessage("Action failed. Check required fields/backend connection.");
     }
   }
+
+  // Notify parent (App) of the currently selected action so the Diff preview can react.
+  useEffect(() => {
+    if (!onActionChange) return;
+    if (decision === "action" && actionKind) {
+      const selected = ACTION_OPTIONS.find((a) => a.kind === actionKind);
+      const payload: Record<string, unknown> = {};
+      if (selected?.requiredField) {
+        payload[selected.requiredField.name] = fieldValue.trim();
+      }
+      onActionChange(actionKind, payload);
+    } else {
+      onActionChange("", {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decision, actionKind, fieldValue]);
 
   async function handleAccept() {
     setDecision("accept");

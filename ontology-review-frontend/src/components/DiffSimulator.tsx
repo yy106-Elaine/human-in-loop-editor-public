@@ -26,14 +26,23 @@ interface DiffData {
   ai_applicability_impact: ImpactMetric[];
 }
 
-export function DiffSimulator({ nodeId }: { nodeId: string }) {
+export function DiffSimulator({
+  nodeId,
+  actionType = "",
+  payload = {},
+}: {
+  nodeId: string;
+  actionType?: string;
+  payload?: Record<string, unknown>;
+}) {
   const [diff, setDiff] = useState<DiffData | null>(null);
 
   useEffect(() => {
-    getDiffSimulation(nodeId)
+    getDiffSimulation(nodeId, actionType, payload)
       .then(setDiff)
       .catch((err) => console.error("Failed to load diff:", err));
-  }, [nodeId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId, actionType, JSON.stringify(payload)]);
 
   if (!diff) {
     return (

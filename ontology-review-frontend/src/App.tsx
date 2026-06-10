@@ -14,8 +14,12 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const [logRefreshKey, setLogRefreshKey] = useState(0);
   const [centerTab, setCenterTab] = useState<
-    "semantic" | "diff" | "log" | "patterns" | "principles"
+    "semantic" | "diff" | "patterns" | "principles"
   >("semantic");
+  const [currentAction, setCurrentAction] = useState<{
+    actionType: string;
+    payload: Record<string, unknown>;
+  }>({ actionType: "", payload: {} });
 
   function handleActionComplete() {
     setLogRefreshKey((v) => v + 1);
@@ -88,17 +92,6 @@ export default function App() {
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
-                Diff Simulator
-              </button>
-
-              <button
-                onClick={() => setCenterTab("log")}
-                className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap ${
-                  centerTab === "log"
-                    ? "border-gray-900 text-gray-900"
-                    : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-              >
                 Review Log
               </button>
 
@@ -126,9 +119,7 @@ export default function App() {
             </div>
 
             <div className="flex-1 min-h-0 overflow-hidden">
-              {centerTab === "log" ? (
-                <ActionLog nodeId={selectedNodeId} refreshKey={logRefreshKey} />
-              ) : centerTab === "patterns" ? (
+              {centerTab === "patterns" ? (
                 <EditPatternsPage onActionComplete={handleActionComplete} />
               ) : centerTab === "principles" ? (
                 <PrinciplesPage />
@@ -139,7 +130,18 @@ export default function App() {
               ) : centerTab === "semantic" ? (
                 <SemanticReview nodeId={selectedNodeId} />
               ) : (
-                <DiffSimulator nodeId={selectedNodeId} />
+                <div className="h-full flex flex-col overflow-hidden">
+                  <div className="flex-1 min-h-0 overflow-y-auto border-b border-gray-200">
+                    <DiffSimulator
+                      nodeId={selectedNodeId}
+                      actionType={currentAction.actionType}
+                      payload={currentAction.payload}
+                    />
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    <ActionLog nodeId={selectedNodeId} refreshKey={logRefreshKey} />
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -150,6 +152,9 @@ export default function App() {
               apiConnected={connected}
               apiKey={apiKey}
               onActionComplete={handleActionComplete}
+              onActionChange={(actionType, payload) =>
+                setCurrentAction({ actionType, payload })
+              }
             />
           </div>
         </div>

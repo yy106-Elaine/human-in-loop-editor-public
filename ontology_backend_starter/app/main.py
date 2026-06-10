@@ -188,9 +188,14 @@ def case_metadata(node_id: str):
     return get_case_metadata(node_id)
 
 
-@app.get("/reviews/{node_id}/diff")
-def diff_simulation(node_id: str):
-    return simulate_diff(node_id)
+class DiffRequest(BaseModel):
+    action_type: str = ""
+    payload: Dict[str, Any] = {}
+
+
+@app.post("/reviews/{node_id}/diff")
+def diff_simulation(node_id: str, body: DiffRequest):
+    return simulate_diff(node_id, body.action_type, body.payload)
 
 
 @app.put("/reviews/{node_id}/notes")

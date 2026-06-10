@@ -19,8 +19,16 @@ export async function getSemanticReview(nodeId: string) {
   return res.json();
 }
 
-export async function getDiffSimulation(nodeId: string) {
-  const res = await fetch(`${API_BASE}/reviews/${encodeURIComponent(nodeId)}/diff`);
+export async function getDiffSimulation(
+  nodeId: string,
+  actionType: string = "",
+  payload: Record<string, unknown> = {}
+) {
+  const res = await fetch(`${API_BASE}/reviews/${nodeId}/diff`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action_type: actionType, payload }),
+  });
   if (!res.ok) throw new Error("Failed to load diff simulation");
   return res.json();
 }
