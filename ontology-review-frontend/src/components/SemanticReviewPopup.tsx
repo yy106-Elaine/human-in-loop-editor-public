@@ -1,0 +1,140 @@
+// src/components/SemanticReviewPopup.tsx
+import { getSemanticInfo, findSemanticByLabel } from "../lib/semanticData";
+
+interface SemanticReviewPopupProps {
+  /** synset id, e.g. "hardware.n.03" — preferred lookup key */
+  synsetId?: string | null;
+  /** fallback: plain word label, e.g. "hardware" */
+  label?: string;
+  /** screen position: popup's left edge and vertical center */
+  x: number;
+  y: number;
+  onClose: () => void;
+}
+
+export function SemanticReviewPopup({
+  synsetId,
+  label,
+  x,
+  y,
+  onClose,
+}: SemanticReviewPopupProps) {
+  const info = synsetId
+    ? getSemanticInfo(synsetId)
+    : label
+    ? findSemanticByLabel(label)
+    : null;
+
+  const parents = info?.pathParents
+    ? info.pathParents.split(">").map((s) => s.trim()).filter(Boolean)
+    : [];
+
+  return (
+    <div
+      className="fixed z-50"
+      // x = popup's left edge (just right of the node),
+      // y = node's vertical center; translateY(-50%) centers the bubble on it
+      style={{ left: x, top: y, transform: "translateY(-50%)" }}
+      role="dialog"
+      aria-label="Semantic Review"
+    >
+      {/* speech bubble */}
+      <div className="relative w-[340px] max-w-[90vw] rounded-xl border border-gray-200 bg-white text-gray-900 shadow-xl">
+        {/* close button */}
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700"
+        >
+          ✕
+        </button>
+
+        {/* content */}
+        <div className="max-h-[60vh] overflow-y-auto p-4 pr-8">
+          {!info ? (
+            <p className="text-sm text-gray-500">
+              No semantic data found for{" "}
+              <span className="font-medium">{synsetId ?? label}</span>.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {/* title */}
+              <div>
+                <h3 className="text-base font-semibold leading-tight text-gray-900">
+                  {info.label || info.synsetId}
+                </h3>
+                <p className="text-xs text-gray-500">{info.synsetId}</p>
+              </div>
+
+              {/* WordNet Definition */}
+              <section>
+                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  WordNet Definition
+                </h4>
+                <p className="text-sm leading-relaxed text-gray-800">
+                  {info.definition || "—"}
+                </p>
+              </section>
+
+              {/* Current Parent(s) */}
+              <section>
+                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Current Parent(s)
+                </h4>
+                {parents.length > 0 ? (
+                  <p className="text-sm leading-relaxed text-gray-800">
+                    {parents.map((p, i) => (
+                      <span key={i}>
+                        {p}
+                        {i < parents.length - 1 && (
+                          <span className="mx-1 text-gray-400">→</span>
+                        )}
+                      </span>
+                    ))}
+                  </p>
+                ) : (
+                  <p className="text-sm text-gray-500">—</p>
+                )}
+              </section>
+
+              {/* O*NET Task Examples */}
+              <section>
+                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  O*NET Task Examples
+                </h4>
+                <p className="text-sm leading-relaxed text-gray-800">
+                  {info.taskExample || "—"}
+                </p>
+              </section>
+            </div>
+          )}
+        </div>
+
+        {/* speech-bubble tail — points LEFT toward the node, vertically centered */}
+        {/* white fill */}
+        <div
+          className="absolute top-1/2 h-0 w-0"
+          style={{
+            left: "-10px",
+            transform: "translateY(-50%)",
+            borderTop: "10px solid transparent",
+            borderBottom: "10px solid transparent",
+            borderRight: "10px solid #ffffff",
+          }}
+        />
+        {/* border outline (slightly larger, sits behind) */}
+        <div
+          className="absolute top-1/2 h-0 w-0"
+          style={{
+            left: "-11px",
+            transform: "translateY(-50%)",
+            borderTop: "11px solid transparent",
+            borderBottom: "11px solid transparent",
+            borderRight: "11px solid #e5e7eb", // gray-200
+            zIndex: -1,
+          }}
+        />
+      </div>
+    </div>
+  );
+}

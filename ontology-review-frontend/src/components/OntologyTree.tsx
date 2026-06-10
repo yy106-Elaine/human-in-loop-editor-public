@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { SemanticReviewPopup } from "./SemanticReviewPopup";
 import {
   ChevronRight,
   ChevronDown,
@@ -33,7 +34,7 @@ interface TreeNodeProps {
   node: OntologyNode;
   level: number;
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (node: OntologyNode, e: React.MouseEvent) => void;
   expandedOverride: Set<string> | null; // when searching, force-expand these
 }
 
@@ -71,7 +72,7 @@ function TreeNode({
           selectedId === node.id ? "bg-blue-50" : ""
         }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
-        onClick={() => onSelect(node.id)}
+        onClick={(e) => onSelect(node, e)}
       >
         <button
           onClick={(e) => {
@@ -172,6 +173,12 @@ export function OntologyTree({
   const [selectedId, setSelectedId] = useState<string | null>(
     null,
   );
+  const [popup, setPopup] = useState<{
+    synset?: string | null;
+    label: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const [active, setActive] = useState<string>("physical"); // active subontology tab
   const [query, setQuery] = useState("");
   
@@ -212,9 +219,18 @@ export function OntologyTree({
     };
   }, []);
 
-  const handleSelect = (id: string) => {
-    setSelectedId(id);
-    onNodeSelect(id);
+  const handleSelect = (node: OntologyNode, e: React.MouseEvent) => {
+    setSelectedId(node.id);
+    onNodeSelect(node.id); // keep teammate's center/right panels working as before
+
+    // position popup to the right of the clicked row, vertically centered on it
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setPopup({
+      synset: node.synset,
+      label: node.label,
+      x: rect.right + 12, // 12px gap to the right of the node row
+      y: rect.top + rect.height / 2, // vertical center of the node row
+    });
   };
 
   const root = ontology[active];
@@ -320,6 +336,16 @@ export function OntologyTree({
           </div>
         </div>
       </div>
+    {/* Semantic Review popup (appears to the right of the clicked node) */}
+      {popup && (
+        <SemanticReviewPopup
+          synsetId={popup.synset}
+          label={popup.label}
+          x={popup.x}
+          y={popup.y}
+          onClose={() => setPopup(null)}
+        />
+      )}
     </div>
   );
 }
