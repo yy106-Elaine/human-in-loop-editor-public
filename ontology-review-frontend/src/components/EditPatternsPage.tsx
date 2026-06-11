@@ -1,191 +1,356 @@
-import { useEffect, useMemo, useState } from "react";
-import { Check, GitMerge, Pencil, RefreshCw, Search, Split, X } from "lucide-react";
-import { decideEditPattern, getDuplicatePatterns, getVirtualPatterns } from "../api/editPatternsApi";
+import { useEffect, useMemo, useState, type LucideIcon } from "react";
+import {
+  AlertTriangle,
+  Check,
+  GitBranch,
+  GitMerge,
+  Layers,
+  Pencil,
+  RefreshCw,
+  Search,
+  X,
+} from "lucide-react";
+import {
+  decideEditPattern,
+  getGroupedPatterns,
+  type PatternCategory,
+  type PatternSuggestion,
+} from "../api/editPatternsApi";
 
-type Tab = "duplicates" | "virtuals";
+const ISSUE_META: Record<string, { icon: LucideIcon; active: string }> = {
+  duplicate: { icon: GitMerge, active: "bg-blue-600 text-white" },
+  virtual: { icon: Layers, active: "bg-purple-600 text-white" },
+  misplaced: { icon: AlertTriangle, active: "bg-amber-600 text-white" },
+  inheritance: { icon: GitBranch, active: "bg-emerald-600 text-white" },
+  naming: { icon: Pencil, active: "bg-pink-600 text-white" },
+};
 
-interface PatternSuggestion {
-  id: string;
-  pattern_type: "duplicate" | "virtual";
-  title: string;
-  label?: string;
-  suggested_action: string;
-  rationale: string;
-  confidence: number;
-  nodes?: { id: string; label: string; code?: string | null; parent_label?: string | null; path: string }[];
-  synsets?: string[];
-  path?: string;
-  node_id?: string;
-  code?: string | null;
-  parent_label?: string | null;
-  children_count?: number;
-}
-
-export function EditPatternsPage() {
-  const [tab, setTab] = useState<Tab>("duplicates");
-  const [duplicates, setDuplicates] = useState<PatternSuggestion[]>([]);
-  const [virtuals, setVirtuals] = useState<PatternSuggestion[]>([]);
-  const [loading, setLoading] = useState(false);
+export function EditPatternsPage({
+  selectedNodeId,
+}: {
+  selectedNodeId?: string | null;
+}) {
+  const [categories, setCategories] = useState<PatternCategory[]>([]);
+  const [activeKey, setActiveKey] = useState("duplicate");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function load() {
     setLoading(true);
     setStatus("");
+
     try {
-      const [dup, virt] = await Promise.all([getDuplicatePatterns(), getVirtualPatterns()]);
-      setDuplicates(dup.suggestions ?? []);
-      setVirtuals(virt.suggestions ?? []);
+      const data = await getGroupedPatterns();
+      const loaded = data.categories ?? [];
+      setCategories(loaded);
+
+      if (loaded.length && !loaded.some((c: PatternCategory) => c.key === activeKey)) {
+        setActiveKey(loaded[0].key);
+      }
     } catch (err) {
       console.error(err);
-      setStatus("Could not load edit patterns. Check backend routes.");
+      setStatus("Could not load editor suggestions. Check backend route /edit-patterns/grouped.");
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  const active = tab === "duplicates" ? duplicates : virtuals;
-  const filtered = useMemo(() => {
+  const activeCategory = categories.find((c) => c.key === activeKey);
+
+  const filteredSuggestions = useMemo(() => {
+    const suggestions = activeCategory?.suggestions ?? [];
     const q = query.trim().toLowerCase();
-    if (!q) return active;
-    return active.filter((p) => JSON.stringify(p).toLowerCase().includes(q));
-  }, [active, query]);
+
+    if (!q) return suggestions;
+
+    return suggestions.filter((suggestion) =>
+      JSON.stringify(suggestion).toLowerCase().includes(q)
+    );
+  }, [activeCategory, query]);
 
   return (
-    <div className="h-full bg-gray-50 overflow-hidden flex flex-col">
-      <div className="bg-white border-b border-gray-200 px-6 py-4">
+    <div className="h-full flex flex-col overflow-hidden bg-gray-50">
+      <div className="shrink-0 bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Edit Pattern Review</h2>
-            <p className="text-sm text-gray-600 mt-0.5">Demo examples: duplicate handling and virtual-node handling.</p>
+            <h3 className="text-base font-semibold text-gray-900">
+              Editor
+            </h3>
+            <p className="text-sm text-gray-600 mt-0.5">
+              Select an edit type, review suggested cases, then accept, alter, or reject.
+              {selectedNodeId && (
+                <span className="ml-1 text-gray-400">
+                  Current tree node: {selectedNodeId}
+                </span>
+              )}
+            </p>
           </div>
-          <button onClick={load} className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50">
-            <RefreshCw size={15} /> Refresh
+
+          <button
+            onClick={load}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
+          >
+            <RefreshCw size={15} />
+            Refresh
           </button>
         </div>
 
-        <div className="mt-4 flex items-center gap-3">
-          <button onClick={() => setTab("duplicates")} className={`px-3 py-1.5 rounded-md text-sm font-medium ${tab === "duplicates" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-            Duplicate Handling ({duplicates.length})
-          </button>
-          <button onClick={() => setTab("virtuals")} className={`px-3 py-1.5 rounded-md text-sm font-medium ${tab === "virtuals" ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}>
-            Virtual Node Handling ({virtuals.length})
-          </button>
+        <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1">
+          {categories.map((category) => {
+            const meta = ISSUE_META[category.key] ?? ISSUE_META.duplicate;
+            const Icon = meta.icon;
+            const active = activeKey === category.key;
 
-          <div className="ml-auto relative">
-            <Search size={15} className="absolute left-2.5 top-2.5 text-gray-400" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search patterns..." className="pl-8 pr-3 py-2 text-sm border border-gray-300 rounded-lg w-72" />
-          </div>
+            return (
+              <button
+                key={category.key}
+                onClick={() => setActiveKey(category.key)}
+                className={`shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  active
+                    ? meta.active
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                <Icon size={15} />
+                {category.title}
+                <span
+                  className={`text-xs px-1.5 py-0.5 rounded ${
+                    active ? "bg-white/20 text-white" : "bg-white text-gray-500"
+                  }`}
+                >
+                  {category.suggestions.length}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-4 relative max-w-lg">
+          <Search
+            size={15}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+          />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search within this edit type..."
+            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400"
+          />
         </div>
       </div>
 
-      {status && <div className="px-6 py-2 text-sm text-red-700 bg-red-50 border-b border-red-100">{status}</div>}
+      {status && (
+        <div className="shrink-0 px-6 py-2 bg-red-50 text-red-700 text-sm">
+          {status}
+        </div>
+      )}
 
-      <div className="flex-1 overflow-y-auto p-6">
-        {loading ? <p className="text-sm text-gray-500">Loading edit patterns...</p> :
-         filtered.length === 0 ? <p className="text-sm text-gray-500">No matching patterns found.</p> :
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            {filtered.map((pattern) => <PatternCard key={pattern.id} pattern={pattern} />)}
-          </div>}
+      <div className="flex-1 min-h-0 overflow-y-auto p-6">
+        {loading ? (
+          <div className="h-full flex items-center justify-center text-sm text-gray-500">
+            Loading editor suggestions...
+          </div>
+        ) : !activeCategory ? (
+          <div className="h-full flex items-center justify-center text-sm text-gray-500">
+            No edit categories loaded.
+          </div>
+        ) : (
+          <div className="max-w-5xl mx-auto">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">
+                {activeCategory.title}
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                {activeCategory.description}
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {filteredSuggestions.length === 0 ? (
+                <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
+                  No suggestions found for this category.
+                </div>
+              ) : (
+                filteredSuggestions.map((suggestion) => (
+                  <SuggestionCard
+                    key={suggestion.id}
+                    suggestion={suggestion}
+                    onDecision={load}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function PatternCard({ pattern }: { pattern: PatternSuggestion }) {
+function SuggestionCard({
+  suggestion,
+  onDecision,
+}: {
+  suggestion: PatternSuggestion;
+  onDecision: () => void;
+}) {
+  const [mode, setMode] = useState<"approve" | "alter" | "reject" | null>(null);
   const [comment, setComment] = useState("");
-  const [alteredAction, setAlteredAction] = useState(pattern.suggested_action);
+  const [alteredAction, setAlteredAction] = useState("");
   const [principleUpdate, setPrincipleUpdate] = useState("");
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState("");
 
-  async function submit(selected: "approve" | "alter" | "reject") {
-    setMessage("");
+  async function submit(decision: "approve" | "alter" | "reject") {
     try {
-      await decideEditPattern(pattern.id, {
-        decision: selected,
+      await decideEditPattern(suggestion.id, {
+        decision,
+        reviewer: "Sophia",
         comment,
-        altered_action: selected === "alter" ? alteredAction : undefined,
+        altered_action: alteredAction,
         principle_update: principleUpdate,
-        payload: { pattern },
+        payload: {
+          pattern_type: suggestion.pattern_type,
+          suggested_action: suggestion.suggested_action,
+          title: suggestion.title,
+        },
       });
-      setMessage(`Saved ${selected} decision.`);
+
+      setStatus(`Saved ${decision} decision.`);
+      setMode(null);
+      setComment("");
+      setAlteredAction("");
+      setPrincipleUpdate("");
+      onDecision();
     } catch (err) {
       console.error(err);
-      setMessage("Save failed. Check backend.");
+      setStatus("Could not save decision.");
     }
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-gray-500">{pattern.pattern_type}</div>
-          <h3 className="text-base font-semibold text-gray-900 mt-0.5">{pattern.title}</h3>
+          <h4 className="text-base font-semibold text-gray-900">
+            {suggestion.title}
+          </h4>
+          <p className="text-sm text-gray-500 mt-1">
+            Suggested action:{" "}
+            <span className="font-medium text-gray-800">
+              {suggestion.suggested_action}
+            </span>
+          </p>
         </div>
-        <span className="text-xs px-2 py-1 rounded bg-blue-50 text-blue-700">{Math.round(pattern.confidence * 100)}%</span>
+
+        <div className="text-right shrink-0">
+          <p className="text-xs text-gray-500">Confidence</p>
+          <p className="text-lg font-semibold text-gray-900">
+            {Math.round(suggestion.confidence * 100)}%
+          </p>
+        </div>
       </div>
 
-      <div className="mt-3 text-sm text-gray-700 leading-relaxed">{pattern.rationale}</div>
+      <p className="text-sm text-gray-700 mt-3 leading-relaxed">
+        {suggestion.rationale}
+      </p>
 
-      <div className="mt-3 rounded-lg bg-gray-50 border border-gray-200 p-3">
-        <div className="text-xs font-semibold text-gray-700 mb-1">Suggested action</div>
-        <div className="inline-flex items-center gap-2 text-sm font-medium text-gray-900">
-          {iconForAction(pattern.suggested_action)} {humanize(pattern.suggested_action)}
-        </div>
-      </div>
-
-      {pattern.pattern_type === "duplicate" && pattern.nodes && (
-        <div className="mt-3">
-          <div className="text-xs font-semibold text-gray-700 mb-2">Matching nodes</div>
-          <div className="space-y-2">
-            {pattern.nodes.map((n) => (
-              <div key={n.id} className="text-xs border border-gray-200 rounded-md p-2">
-                <div className="font-mono text-gray-900">{n.id}</div>
-                <div className="text-gray-600">{n.path}</div>
-                {n.code && <div className="text-gray-500">Synset: {n.code}</div>}
+      {suggestion.nodes && suggestion.nodes.length > 0 && (
+        <div className="mt-4 grid gap-2">
+          {suggestion.nodes.slice(0, 5).map((node) => (
+            <div
+              key={node.id}
+              className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm font-medium text-gray-900">
+                  {node.label}
+                </span>
+                <span className="text-xs text-gray-500">
+                  {node.code ?? "no synset"}
+                </span>
               </div>
-            ))}
-          </div>
+              {node.path && (
+                <p className="text-xs text-gray-500 mt-1 truncate">
+                  {node.path}
+                </p>
+              )}
+            </div>
+          ))}
         </div>
       )}
 
-      {pattern.pattern_type === "virtual" && (
-        <div className="mt-3 text-xs text-gray-600 space-y-1">
-          <div><strong>Node:</strong> {pattern.node_id}</div>
-          <div><strong>Path:</strong> {pattern.path}</div>
-          <div><strong>Children:</strong> {pattern.children_count}</div>
-        </div>
+      {suggestion.path && (
+        <p className="text-xs text-gray-500 mt-3">{suggestion.path}</p>
       )}
 
-      <div className="mt-4 border-t border-gray-100 pt-4">
-        <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2} placeholder="Human reviewer note..." className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 resize-none" />
+      <div className="mt-4 flex gap-2">
+        <button
+          onClick={() => setMode("approve")}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700"
+        >
+          <Check size={13} />
+          Accept
+        </button>
 
-        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-          <input value={alteredAction} onChange={(e) => setAlteredAction(e.target.value)} placeholder="Altered action, if changing" className="text-sm border border-gray-300 rounded-lg px-3 py-2" />
-          <input value={principleUpdate} onChange={(e) => setPrincipleUpdate(e.target.value)} placeholder="Optional principle update" className="text-sm border border-gray-300 rounded-lg px-3 py-2" />
-        </div>
+        <button
+          onClick={() => setMode("alter")}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200"
+        >
+          <Pencil size={13} />
+          Alter
+        </button>
 
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button onClick={() => submit("approve")} className="inline-flex justify-center items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"><Check size={15} /> Accept</button>
-          <button onClick={() => submit("alter")} className="inline-flex justify-center items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white hover:bg-gray-800"><Pencil size={15} /> Alter</button>
-          <button onClick={() => submit("reject")} className="inline-flex justify-center items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200"><X size={15} /> Reject</button>
-        </div>
-
-        {message && <div className="mt-2 text-xs text-gray-600">{message}</div>}
+        <button
+          onClick={() => setMode("reject")}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-gray-100 text-gray-700 hover:bg-gray-200"
+        >
+          <X size={13} />
+          Reject
+        </button>
       </div>
+
+      {mode && (
+        <div className="mt-4 border border-gray-200 rounded-lg p-3 bg-gray-50">
+          {mode === "alter" && (
+            <input
+              value={alteredAction}
+              onChange={(e) => setAlteredAction(e.target.value)}
+              placeholder="Altered action..."
+              className="w-full mb-2 text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400"
+            />
+          )}
+
+          <textarea
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            placeholder="Reviewer note..."
+            rows={2}
+            className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400 resize-none"
+          />
+
+          <textarea
+            value={principleUpdate}
+            onChange={(e) => setPrincipleUpdate(e.target.value)}
+            placeholder="Optional: turn this decision into a reusable principle..."
+            rows={2}
+            className="mt-2 w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400 resize-none"
+          />
+
+          <button
+            onClick={() => submit(mode)}
+            className="mt-2 w-full px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800"
+          >
+            Save {mode} decision
+          </button>
+        </div>
+      )}
+
+      {status && <p className="mt-2 text-xs text-gray-500">{status}</p>}
     </div>
   );
-}
-
-function iconForAction(action: string) {
-  if (action.includes("merge")) return <GitMerge size={15} />;
-  if (action.includes("rename") || action.includes("alter")) return <Pencil size={15} />;
-  if (action.includes("split") || action.includes("separate")) return <Split size={15} />;
-  return <Check size={15} />;
-}
-
-function humanize(value: string) {
-  return value.replaceAll("_", " ");
 }

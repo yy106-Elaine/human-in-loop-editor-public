@@ -445,10 +445,287 @@ def decide_ai_suggestion(node_id: str, suggestion_id: str, body: AISuggestionDec
 # -----------------------------------------------------------------------------
 # Edit-pattern demo routes
 # -----------------------------------------------------------------------------
+def _norm_pattern_label(label: str) -> str:
+    return (
+        label.replace("_", " ")
+        .replace("-", " ")
+        .replace("[virtual]", "")
+        .strip()
+        .lower()
+    )
+
+
+def _top_category(row: Dict[str, Any]) -> str:
+    path = row.get("path") or []
+    return path[0] if path else "Unknown"
+
+
+def _detect_inheritance_patterns() -> Dict[str, Any]:
+    rows = flatten_tree(ONTOLOGY_TREE)
+    groups: Dict[str, List[Dict[str, Any]]] = {}
+
+    for row in rows:
+        label = _norm_pattern_label(row.get("label", ""))
+        if not label:
+            continue
+        groups.setdefault(label, []).append(row)
+
+    suggestions: List[Dict[str, Any]] = []
+
+    for label, matches in groups.items():
+        if len(matches) < 2:
+            continue
+
+        top_categories = sorted({_top_category(row) for row in matches})
+        synsets = sorted({row.get("code") for row in matches if row.get("code")})
+
+        if len(top_categories) < 2:
+            continue
+
+        suggestions.append(
+            {
+                "id": f"inheritance::{label}",
+                "pattern_type": "inheritance",
+                "label": matches[0]["label"],
+                "title": f"Multiple inheritance candidate: {matches[0]['label']}",
+                "suggested_action": "consider_multiple_inheritance",
+                "rationale": (
+                    "This label appears in multiple sub-ontologies or inheritance paths. "
+                    "A reviewer should decide whether these are distinct senses, duplicate entries, "
+                    "or a valid multiple-inheritance concept."
+                ),
+                "confidence": 0.72,
+                "nodes": [
+                    {
+                        "id": row["id"],
+                        "label": row["label"],
+                        "code": row.get("code"),
+                        "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
+                        "path": row.get("path_string", ""),
+                    }
+                    for row in matches[:6]
+                ],
+                "synsets": synsets,
+            }
+        )
+
+    suggestions.sort(key=lambda item: (-item["confidence"], item["label"]))
+    return {
+        "pattern_type": "inheritance",
+        "count": len(suggestions),
+        "suggestions": suggestions[:25],
+    }
+
+
+def _detect_misplaced_patterns() -> Dict[str, Any]:
+    rows = flatten_tree(ONTOLOGY_TREE)
+    suggestions: List[Dict[str, Any]] = []
+
+    activity_like = {
+        "meeting",
+        "conference",
+        "convention",
+        "date",
+        "party",
+        "dinner",
+        "reception",
+    }
+    information_like = {
+        "record",
+        "document",
+        "paper",
+        "table",
+        "file",
+        "report",
+        "chart",
+        "map",
+    }
+    actor_like = {
+        "school",
+        "library",
+        "office",
+        "institution",
+        "government",
+        "company",
+        "staff",
+    }
+
+    for row in rows:
+        label = _norm_pattern_label(row.get("label", ""))
+        top = _top_category(row).lower()
+        path_string = row.get("path_string", "")
+
+        suggested_parent = None
+
+        if label in activity_like and "activit" not in top:
+            suggested_parent = "Activities"
+        elif label in information_like and "information" not in top:
+            suggested_parent = "Information"
+        elif label in actor_like and "actor" not in top and "physical" in top:
+            suggested_parent = "Actor or multiple inheritance"
+
+        if suggested_parent:
+            suggestions.append(
+                {
+                    "id": f"misplaced::{row['id']}",
+                    "pattern_type": "misplaced",
+                    "node_id": row["id"],
+                    "label": row["label"],
+                    "code": row.get("code"),
+                    "path": path_string,
+                    "title": f"Possible misplaced node: {row['label']}",
+                    "suggested_action": f"review placement under {suggested_parent}",
+                    "rationale": (
+                        f"The node appears under {top or 'an unclear category'}, but its label suggests "
+                        f"it may belong under {suggested_parent}. A human reviewer should verify whether "
+                        "this is a true IS-A relationship or a contextual use."
+                    ),
+                    "confidence": 0.64,
+                    "nodes": [
+                        {
+                            "id": row["id"],
+                            "label": row["label"],
+                            "code": row.get("code"),
+                            "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
+                            "path": path_string,
+                        }
+                    ],
+                }
+            )
+
+    return {
+        "pattern_type": "misplaced",
+        "count": len(suggestions),
+        "suggestions": suggestions[:25],
+    }
+
+
+def _detect_naming_patterns() -> Dict[str, Any]:
+    rows = flatten_tree(ONTOLOGY_TREE)
+    suggestions: List[Dict[str, Any]] = []
+
+    vague_labels = {
+        "thing",
+        "entity",
+        "object",
+        "unit",
+        "body",
+        "part",
+        "set",
+        "group",
+        "system",
+        "structure",
+        "matter",
+        "attribute",
+        "process",
+    }
+
+    for row in rows:
+        label_raw = row.get("label", "")
+        label = _norm_pattern_label(label_raw)
+        has_underscore = "_" in label_raw
+        no_synset = not row.get("code")
+        vague = label in vague_labels
+        virtual_marker = "[virtual]" in label_raw.lower()
+
+        if not (has_underscore or no_synset or vague or virtual_marker):
+            continue
+
+        confidence = 0.58
+        if no_synset:
+            confidence += 0.12
+        if vague:
+            confidence += 0.10
+        if virtual_marker:
+            confidence += 0.05
+
+        suggestions.append(
+            {
+                "id": f"naming::{row['id']}",
+                "pattern_type": "naming",
+                "node_id": row["id"],
+                "label": row["label"],
+                "code": row.get("code"),
+                "path": row.get("path_string", ""),
+                "title": f"Naming review: {row['label']}",
+                "suggested_action": "clarify_label_or_add_disambiguation",
+                "rationale": (
+                    "This node may need a clearer label or disambiguation because it is vague, virtual, "
+                    "missing a synset, or formatted in a way that may hide the intended sense."
+                ),
+                "confidence": min(confidence, 0.88),
+                "nodes": [
+                    {
+                        "id": row["id"],
+                        "label": row["label"],
+                        "code": row.get("code"),
+                        "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
+                        "path": row.get("path_string", ""),
+                    }
+                ],
+            }
+        )
+
+    suggestions.sort(key=lambda item: (-item["confidence"], item["label"]))
+    return {
+        "pattern_type": "naming",
+        "count": len(suggestions),
+        "suggestions": suggestions[:25],
+    }
+
+
 @app.get("/edit-patterns")
 def edit_patterns():
-    """Return all detected edit-pattern suggestions for the demo page."""
+    """Return all detected edit-pattern suggestions for compatibility."""
     return detect_all_edit_patterns()
+
+
+@app.get("/edit-patterns/grouped")
+def grouped_edit_patterns():
+    """Return all edit-pattern suggestions grouped by issue type for the Examples page."""
+    duplicates = detect_duplicate_patterns()
+    virtuals = detect_virtual_node_patterns()
+    misplaced = _detect_misplaced_patterns()
+    inheritance = _detect_inheritance_patterns()
+    naming = _detect_naming_patterns()
+
+    categories = [
+        {
+            "key": "duplicate",
+            "title": "Duplicate Handling",
+            "description": "Same label, repeated concept, or different synsets that need merge/rename review.",
+            "suggestions": duplicates.get("suggestions", [])[:25],
+        },
+        {
+            "key": "virtual",
+            "title": "Virtual Node Handling",
+            "description": "Virtual nodes that should be kept, altered, or removed based on inheritance value.",
+            "suggestions": virtuals.get("suggestions", [])[:25],
+        },
+        {
+            "key": "misplaced",
+            "title": "Misplaced Nodes",
+            "description": "Nodes whose current parent may not express a valid IS-A relationship.",
+            "suggestions": misplaced.get("suggestions", [])[:25],
+        },
+        {
+            "key": "inheritance",
+            "title": "Multiple Inheritance",
+            "description": "Concepts that may legitimately belong under more than one parent.",
+            "suggestions": inheritance.get("suggestions", [])[:25],
+        },
+        {
+            "key": "naming",
+            "title": "Naming / Disambiguation",
+            "description": "Labels that may need clearer names, sense labels, or formatting changes.",
+            "suggestions": naming.get("suggestions", [])[:25],
+        },
+    ]
+
+    return {
+        "categories": categories,
+        "counts": {category["key"]: len(category["suggestions"]) for category in categories},
+    }
 
 
 @app.get("/edit-patterns/duplicates")
@@ -461,6 +738,24 @@ def duplicate_edit_patterns():
 def virtual_edit_patterns():
     """Detect virtual node keep / alter / remove edit patterns."""
     return detect_virtual_node_patterns()
+
+
+@app.get("/edit-patterns/misplaced")
+def misplaced_edit_patterns():
+    """Detect possible misplaced-node edit patterns."""
+    return _detect_misplaced_patterns()
+
+
+@app.get("/edit-patterns/inheritance")
+def inheritance_edit_patterns():
+    """Detect possible multiple-inheritance edit patterns."""
+    return _detect_inheritance_patterns()
+
+
+@app.get("/edit-patterns/naming")
+def naming_edit_patterns():
+    """Detect naming/disambiguation edit patterns."""
+    return _detect_naming_patterns()
 
 
 @app.get("/reviews/{node_id}/patterns")
@@ -554,4 +849,3 @@ def add_principle(body: PatternDecisionRequest):
     }
     PRINCIPLES.append(principle)
     return {"ok": True, "principle": principle}
-

@@ -1,12 +1,55 @@
 const API_BASE = "http://127.0.0.1:8000";
 
-export interface PatternDecisionInput {
-  decision: "approve" | "alter" | "reject";
-  reviewer?: string;
-  comment?: string;
-  altered_action?: string;
-  principle_update?: string;
-  payload?: Record<string, unknown>;
+export interface PatternNode {
+  id: string;
+  label: string;
+  code?: string | null;
+  parent_label?: string | null;
+  path?: string;
+}
+
+export interface PatternSuggestion {
+  id: string;
+  pattern_type:
+    | "duplicate"
+    | "virtual"
+    | "misplaced"
+    | "inheritance"
+    | "naming";
+  title: string;
+  label?: string;
+  suggested_action: string;
+  rationale: string;
+  confidence: number;
+  nodes?: PatternNode[];
+  synsets?: string[];
+  node_id?: string;
+  code?: string | null;
+  parent_label?: string | null;
+  path?: string;
+  children_count?: number;
+}
+
+export interface PatternCategory {
+  key: string;
+  title: string;
+  description: string;
+  suggestions: PatternSuggestion[];
+}
+
+export interface Principle {
+  id: string;
+  title: string;
+  body: string;
+  source: string;
+  examples?: string[];
+  created_at?: string;
+}
+
+export async function getGroupedPatterns() {
+  const res = await fetch(`${API_BASE}/edit-patterns/grouped`);
+  if (!res.ok) throw new Error("Failed to load grouped edit patterns");
+  return res.json();
 }
 
 export async function getDuplicatePatterns() {
@@ -17,27 +60,35 @@ export async function getDuplicatePatterns() {
 
 export async function getVirtualPatterns() {
   const res = await fetch(`${API_BASE}/edit-patterns/virtual`);
-  if (!res.ok) throw new Error("Failed to load virtual node patterns");
+  if (!res.ok) throw new Error("Failed to load virtual patterns");
   return res.json();
 }
 
-export async function decideEditPattern(patternId: string, input: PatternDecisionInput) {
-  const res = await fetch(`${API_BASE}/edit-patterns/${encodeURIComponent(patternId)}/decision`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ reviewer: "Sophia", ...input }),
-  });
+export async function decideEditPattern(
+  patternId: string,
+  body: {
+    decision: "approve" | "alter" | "reject";
+    reviewer?: string;
+    comment?: string;
+    altered_action?: string;
+    principle_update?: string;
+    payload?: Record<string, unknown>;
+  }
+) {
+  const res = await fetch(
+    `${API_BASE}/edit-patterns/${encodeURIComponent(patternId)}/decision`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Failed to save edit pattern decision: ${text}`);
+    throw new Error(`Failed to store pattern decision: ${text}`);
   }
-  return res.json();
-}
 
-export async function getEditPatternDecisions() {
-  const res = await fetch(`${API_BASE}/edit-pattern-decisions`);
-  if (!res.ok) throw new Error("Failed to load decisions");
   return res.json();
 }
 
@@ -47,16 +98,23 @@ export async function getPrinciples() {
   return res.json();
 }
 
-export async function addPrinciple(body: string) {
+export async function addPrinciple(text: string) {
   const res = await fetch(`${API_BASE}/principles`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       decision: "approve",
       reviewer: "Sophia",
-      principle_update: body,
+      principle_update: text,
     }),
   });
+
   if (!res.ok) throw new Error("Failed to add principle");
+  return res.json();
+}
+
+export async function getEditPatternDecisions() {
+  const res = await fetch(`${API_BASE}/edit-pattern-decisions`);
+  if (!res.ok) throw new Error("Failed to load edit pattern decisions");
   return res.json();
 }
