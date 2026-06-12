@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import {
   decideEditPattern,
+  getEditPatternDecisions,
   getGroupedPatterns,
   type PatternCategory,
   type PatternSuggestion,
@@ -25,6 +26,19 @@ const ISSUE_META: Record<string, { icon: LucideIcon; active: string }> = {
   naming: { icon: Pencil, active: "bg-pink-600 text-white" },
 };
 
+const ALL_KEY = "__all__";
+
+interface FinishedChange {
+  id: string;
+  pattern_id: string;
+  decision: "approve" | "alter" | "reject";
+  reviewer: string;
+  comment: string;
+  altered_action?: string | null;
+  payload?: { title?: string; suggested_action?: string; pattern_type?: string };
+  created_at: string;
+}
+
 export function EditPatternsPage({
   selectedNodeId,
 }: {
@@ -35,6 +49,7 @@ export function EditPatternsPage({
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [decisions, setDecisions] = useState<FinishedChange[]>([]);
 
   async function load() {
     setLoading(true);
@@ -44,6 +59,14 @@ export function EditPatternsPage({
       const data = await getGroupedPatterns();
       const loaded = data.categories ?? [];
       setCategories(loaded);
+
+      // also load the human decisions that have already been made
+      try {
+        const decisionData = await getEditPatternDecisions();
+        setDecisions(decisionData.decisions ?? []);
+      } catch (decErr) {
+        console.error(decErr);
+      }
 
       if (loaded.length && !loaded.some((c: PatternCategory) => c.key === activeKey)) {
         setActiveKey(loaded[0].key);
@@ -60,10 +83,14 @@ export function EditPatternsPage({
     load();
   }, []);
 
+  const isAll = activeKey === ALL_KEY;
   const activeCategory = categories.find((c) => c.key === activeKey);
 
   const filteredSuggestions = useMemo(() => {
-    const suggestions = activeCategory?.suggestions ?? [];
+    // when ALL is selected, merge suggestions across every category
+    const suggestions = isAll
+      ? categories.flatMap((c) => c.suggestions)
+      : activeCategory?.suggestions ?? [];
     const q = query.trim().toLowerCase();
 
     if (!q) return suggestions;
@@ -71,7 +98,7 @@ export function EditPatternsPage({
     return suggestions.filter((suggestion) =>
       JSON.stringify(suggestion).toLowerCase().includes(q)
     );
-  }, [activeCategory, query]);
+  }, [isAll, categories, activeCategory, query]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gray-50">
@@ -128,6 +155,35 @@ export function EditPatternsPage({
               </button>
             );
           })}
+
+          {/* ALL tab — shows every category's suggestions combined */}
+          {categories.length > 0 && (() => {
+            const active = activeKey === ALL_KEY;
+            const totalCount = categories.reduce(
+              (sum, c) => sum + c.suggestions.length,
+              0
+            );
+            return (
+              <button
+                onClick={() => setActiveKey(ALL_KEY)}
+                className={`shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  active
+                    ? "bg-gray-900 text-white"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                }`}
+              >
+                <Layers size={15} />
+                All
+                <span
+                  className={`text-xs px-1.5 py-0.5 rounded ${
+                    active ? "bg-white/20 text-white" : "bg-white text-gray-500"
+                  }`}
+                >
+                  {totalCount}
+                </span>
+              </button>
+            );
+          })()}
         </div>
 
         <div className="mt-4 relative max-w-lg">
@@ -155,7 +211,7 @@ export function EditPatternsPage({
           <div className="h-full flex items-center justify-center text-sm text-gray-500">
             Loading editor suggestions...
           </div>
-        ) : !activeCategory ? (
+        ) : !isAll && !activeCategory ? (
           <div className="h-full flex items-center justify-center text-sm text-gray-500">
             No edit categories loaded.
           </div>
@@ -163,10 +219,12 @@ export function EditPatternsPage({
           <div className="max-w-5xl mx-auto">
             <div className="mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
-                {activeCategory.title}
+                {isAll ? "All Edit Patterns" : activeCategory!.title}
               </h3>
               <p className="text-sm text-gray-600 mt-1">
-                {activeCategory.description}
+                {isAll
+                  ? "Every detected edit pattern across all issue types."
+                  : activeCategory!.description}
               </p>
             </div>
 
@@ -183,6 +241,28 @@ export function EditPatternsPage({
                     onDecision={load}
                   />
                 ))
+              )}
+            </div>
+
+            {/* Finished Changes — human decisions already made */}
+            <div className="mt-10 border-t border-gray-200 pt-6">
+              <h3 className="text-lg font-semibold text-gray-900">
+                Finished Changes
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Decisions you've already made on the suggestions above.
+              </p>
+
+              {decisions.length === 0 ? (
+                <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
+                  No finished changes yet.
+                </div>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  {[...decisions].reverse().map((d) => (
+                    <FinishedChangeRow key={d.id} change={d} />
+                  ))}
+                </div>
               )}
             </div>
           </div>
@@ -351,6 +431,38 @@ function SuggestionCard({
       )}
 
       {status && <p className="mt-2 text-xs text-gray-500">{status}</p>}
+    </div>
+  );
+}
+
+function FinishedChangeRow({ change }: { change: FinishedChange }) {
+  const decisionStyle: Record<string, string> = {
+    approve: "bg-green-100 text-green-700",
+    alter: "bg-amber-100 text-amber-700",
+    reject: "bg-red-100 text-red-700",
+  };
+  const title = change.payload?.title || change.pattern_id;
+  const when = change.created_at
+    ? new Date(change.created_at).toLocaleString()
+    : "";
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-gray-900 truncate">{title}</p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          {change.reviewer}
+          {when && ` · ${when}`}
+          {change.altered_action && ` · → ${change.altered_action}`}
+        </p>
+      </div>
+      <span
+        className={`shrink-0 text-xs font-medium px-2 py-1 rounded ${
+          decisionStyle[change.decision] ?? "bg-gray-100 text-gray-600"
+        }`}
+      >
+        {change.decision}
+      </span>
     </div>
   );
 }
