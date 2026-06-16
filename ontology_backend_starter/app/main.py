@@ -50,6 +50,7 @@ AI_SUGGESTION_STORE: Dict[str, List[Dict[str, Any]]] = {}
 # In-memory stores for edit-pattern demo decisions and shared principles.
 # Later: move these to SQLite/Postgres alongside ACTION_LOG.
 PATTERN_DECISIONS: List[Dict[str, Any]] = []
+CONFLICTS: List[Dict[str, Any]] = []
 PRINCIPLES: List[Dict[str, Any]] = [
     {
         "id": "principle-duplicate-sense",
@@ -127,6 +128,66 @@ class PatternDecisionRequest(BaseModel):
     principle_update: Optional[str] = None
     link_principle_id: Optional[str] = None
     payload: Dict[str, Any] = {}
+
+
+class ConsensusRequest(BaseModel):
+    reviewer: Optional[str] = "Unassigned"
+    consensus_decision: str  # approve | alter | reject
+    consensus_action: Optional[str] = None
+    comment: Optional[str] = ""
+
+
+def decision_signature(record: Dict[str, Any]) -> str:
+    """A compact representation of what the reviewer actually chose.
+
+    Two reviewers can both review the same pattern without creating a conflict
+    if their signatures match. A conflict appears only when the decision/action
+    differs across different reviewers.
+    """
+    return "|".join(
+        [
+            record.get("decision", ""),
+            record.get("altered_action") or "",
+            str(record.get("payload", {}).get("suggested_action", "")),
+        ]
+    )
+
+
+def recompute_conflict(pattern_id: str) -> Optional[Dict[str, Any]]:
+    votes = [d for d in PATTERN_DECISIONS if d.get("pattern_id") == pattern_id]
+    reviewers = {v.get("reviewer") for v in votes}
+
+    if len(votes) < 2 or len(reviewers) < 2:
+        return None
+
+    signatures = {decision_signature(v) for v in votes}
+    if len(signatures) <= 1:
+        return None
+
+    existing = next(
+        (
+            c
+            for c in CONFLICTS
+            if c.get("pattern_id") == pattern_id and c.get("status") == "open"
+        ),
+        None,
+    )
+    if existing:
+        existing["votes"] = votes
+        existing["updated_at"] = now_iso()
+        return existing
+
+    conflict = {
+        "id": f"conflict-{len(CONFLICTS) + 1}",
+        "pattern_id": pattern_id,
+        "status": "open",
+        "votes": votes,
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "consensus": None,
+    }
+    CONFLICTS.append(conflict)
+    return conflict
 
 
 @app.get("/health")
@@ -790,6 +851,10 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
     }
     PATTERN_DECISIONS.append(record)
 
+    conflict = recompute_conflict(pattern_id)
+    if conflict:
+        record["created_conflict_id"] = conflict["id"]
+
     # If the reviewer linked this edit to an existing principle,
     # add this pattern_id to that principle's examples (dedup).
     if body.link_principle_id:
@@ -831,6 +896,61 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
     }
 
 
+@app.get("/collaboration/conflicts")
+def collaboration_conflicts(status: Optional[str] = None):
+    """Return open/resolved conflicts created by incompatible reviewer decisions."""
+    rows = CONFLICTS
+    if status:
+        rows = [c for c in rows if c.get("status") == status]
+    return {"conflicts": rows}
+
+
+@app.get("/collaboration/summary")
+def collaboration_summary():
+    """Return reviewer decisions and conflict state for collaborative review UI."""
+    return {"decisions": PATTERN_DECISIONS, "conflicts": CONFLICTS}
+
+
+@app.post("/collaboration/conflicts/{conflict_id}/consensus")
+def resolve_conflict(conflict_id: str, body: ConsensusRequest):
+    """Resolve an open conflict by storing a consensus decision."""
+    conflict = next((c for c in CONFLICTS if c.get("id") == conflict_id), None)
+    if conflict is None:
+        raise HTTPException(status_code=404, detail="Conflict not found")
+    if conflict.get("status") == "resolved":
+        raise HTTPException(status_code=400, detail="Conflict already resolved")
+
+    decision = body.consensus_decision.lower().strip()
+    if decision not in {"approve", "alter", "reject"}:
+        raise HTTPException(status_code=400, detail="consensus_decision must be approve, alter, or reject")
+
+    consensus = {
+        "id": f"consensus-{uuid4().hex[:8]}",
+        "conflict_id": conflict_id,
+        "pattern_id": conflict["pattern_id"],
+        "decision": decision,
+        "altered_action": body.consensus_action,
+        "reviewer": body.reviewer or "Unassigned",
+        "comment": body.comment or "",
+        "created_at": now_iso(),
+    }
+
+    conflict["status"] = "resolved"
+    conflict["consensus"] = consensus
+    conflict["resolved_at"] = consensus["created_at"]
+    conflict["updated_at"] = consensus["created_at"]
+
+    log_event(
+        node_id=conflict["pattern_id"],
+        action_type="conflict_consensus",
+        reviewer=body.reviewer,
+        notes=body.comment,
+        payload=consensus,
+    )
+
+    return {"ok": True, "conflict": conflict}
+
+
 @app.get("/edit-pattern-decisions")
 def edit_pattern_decisions():
     """Return stored human decisions on edit-pattern suggestions."""
@@ -843,15 +963,9 @@ def get_principles():
     return {"principles": PRINCIPLES}
 
 
-class AddPrincipleRequest(BaseModel):
-    principle_update: Optional[str] = None
-    comment: Optional[str] = None
-    examples: List[str] = []
-
-
 @app.post("/principles")
-def add_principle(body: AddPrincipleRequest):
-    """Manually add a shared editing principle, optionally linking existing edits."""
+def add_principle(body: PatternDecisionRequest):
+    """Manually add a shared editing principle."""
     text = (body.principle_update or body.comment or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="principle_update or comment is required")
@@ -861,7 +975,7 @@ def add_principle(body: AddPrincipleRequest):
         "title": "Human-added principle",
         "body": text,
         "source": "manual",
-        "examples": list(dict.fromkeys(body.examples or [])),  # dedup, keep order
+        "examples": [],
         "created_at": now_iso(),
     }
     PRINCIPLES.append(principle)

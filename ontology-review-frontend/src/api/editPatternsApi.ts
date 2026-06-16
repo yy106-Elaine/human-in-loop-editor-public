@@ -46,6 +46,45 @@ export interface Principle {
   created_at?: string;
 }
 
+export interface FinishedChange {
+  id: string;
+  pattern_id: string;
+  decision: "approve" | "alter" | "reject";
+  reviewer: string;
+  comment: string;
+  altered_action?: string | null;
+  linked_principle_id?: string;
+  principle_added?: Principle;
+  payload?: {
+    title?: string;
+    suggested_action?: string;
+    pattern_type?: string;
+    [key: string]: unknown;
+  };
+  created_at: string;
+  created_conflict_id?: string;
+}
+
+export interface CollaborationConflict {
+  id: string;
+  pattern_id: string;
+  status: "open" | "resolved";
+  votes: FinishedChange[];
+  consensus?: {
+    id: string;
+    conflict_id: string;
+    pattern_id: string;
+    decision: "approve" | "alter" | "reject";
+    altered_action?: string | null;
+    reviewer: string;
+    comment?: string;
+    created_at: string;
+  } | null;
+  created_at: string;
+  updated_at?: string;
+  resolved_at?: string;
+}
+
 export async function getGroupedPatterns() {
   const res = await fetch(`${API_BASE}/edit-patterns/grouped`);
   if (!res.ok) throw new Error("Failed to load grouped edit patterns");
@@ -99,13 +138,13 @@ export async function getPrinciples() {
   return res.json();
 }
 
-export async function addPrinciple(text: string) {
+export async function addPrinciple(text: string, reviewer = "Sophia") {
   const res = await fetch(`${API_BASE}/principles`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       decision: "approve",
-      reviewer: "Sophia",
+      reviewer,
       principle_update: text,
     }),
   });
@@ -117,5 +156,41 @@ export async function addPrinciple(text: string) {
 export async function getEditPatternDecisions() {
   const res = await fetch(`${API_BASE}/edit-pattern-decisions`);
   if (!res.ok) throw new Error("Failed to load edit pattern decisions");
+  return res.json();
+}
+
+export async function getConflicts(status?: "open" | "resolved") {
+  const url = status
+    ? `${API_BASE}/collaboration/conflicts?status=${status}`
+    : `${API_BASE}/collaboration/conflicts`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Failed to load collaboration conflicts");
+  return res.json();
+}
+
+export async function resolveConflict(
+  conflictId: string,
+  body: {
+    reviewer: string;
+    consensus_decision: "approve" | "alter" | "reject";
+    consensus_action?: string;
+    comment?: string;
+  }
+) {
+  const res = await fetch(
+    `${API_BASE}/collaboration/conflicts/${encodeURIComponent(conflictId)}/consensus`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to resolve conflict: ${text}`);
+  }
+
   return res.json();
 }

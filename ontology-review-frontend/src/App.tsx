@@ -118,7 +118,7 @@ export default function App() {
                   currentUser={currentUser}
                 />
               ) : (
-                <PrinciplesPage />
+                <PrinciplesPage currentUser={currentUser} />
               )}
             </div>
           </main>

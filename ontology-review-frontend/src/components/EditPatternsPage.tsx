@@ -15,9 +15,13 @@ import {
 } from "lucide-react";
 import {
   decideEditPattern,
+  getConflicts,
   getEditPatternDecisions,
   getGroupedPatterns,
   getPrinciples,
+  resolveConflict,
+  type CollaborationConflict,
+  type FinishedChange,
   type PatternCategory,
   type PatternSuggestion,
 } from "../api/editPatternsApi";
@@ -62,17 +66,6 @@ interface PrincipleOption {
 }
 const ALL_KEY = "__all__";
 
-interface FinishedChange {
-  id: string;
-  pattern_id: string;
-  decision: "approve" | "alter" | "reject";
-  reviewer: string;
-  comment: string;
-  altered_action?: string | null;
-  payload?: { title?: string; suggested_action?: string; pattern_type?: string };
-  created_at: string;
-}
-
 export function EditPatternsPage({
   selectedNodeId,
   currentUser,
@@ -87,23 +80,23 @@ export function EditPatternsPage({
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [decisions, setDecisions] = useState<FinishedChange[]>([]);
+  const [conflicts, setConflicts] = useState<CollaborationConflict[]>([]);
 
   async function load() {
     setLoading(true);
     setStatus("");
 
     try {
-      const data = await getGroupedPatterns();
+      const [data, decisionData, conflictData] = await Promise.all([
+        getGroupedPatterns(),
+        getEditPatternDecisions(),
+        getConflicts(),
+      ]);
+
       const loaded = data.categories ?? [];
       setCategories(loaded);
-
-      // also load the human decisions that have already been made
-      try {
-        const decisionData = await getEditPatternDecisions();
-        setDecisions(decisionData.decisions ?? []);
-      } catch (decErr) {
-        console.error(decErr);
-      }
+      setDecisions(decisionData.decisions ?? []);
+      setConflicts(conflictData.conflicts ?? []);
 
       if (loaded.length && !loaded.some((c: PatternCategory) => c.key === activeKey)) {
         setActiveKey(loaded[0].key);
@@ -295,12 +288,22 @@ export function EditPatternsPage({
                       key={suggestion.id}
                       suggestion={suggestion}
                       currentUser={currentUser}
+                      decisions={decisions.filter((d) => d.pattern_id === suggestion.id)}
+                      conflict={conflicts.find(
+                        (c) => c.pattern_id === suggestion.id && c.status === "open"
+                      )}
                       onDecision={load}
                     />
                   ))
                 )}
               </div>
             )}
+
+            <ConflictResolutionPanel
+              conflicts={conflicts.filter((c) => c.status === "open")}
+              currentUser={currentUser}
+              onResolved={load}
+            />
 
             {/* Finished Changes — human decisions already made */}
             {statusFilter !== "unfinished" && (
@@ -335,10 +338,14 @@ export function EditPatternsPage({
 function SuggestionCard({
   suggestion,
   currentUser,
+  decisions,
+  conflict,
   onDecision,
 }: {
   suggestion: PatternSuggestion;
   currentUser: string;
+  decisions: FinishedChange[];
+  conflict?: CollaborationConflict;
   onDecision: () => void;
 }) {
   const [mode, setMode] = useState<"approve" | "alter" | "reject" | null>(null);
@@ -446,6 +453,18 @@ function SuggestionCard({
 
       {suggestion.path && (
         <p className="text-xs text-gray-500 mt-3">{suggestion.path}</p>
+      )}
+
+      {decisions.length > 0 && (
+        <div className="mt-4 rounded-lg border border-gray-200 bg-white/80 px-3 py-2 text-xs text-gray-600">
+          Reviewed by: {decisions.map((d) => `${d.reviewer} (${d.decision})`).join(", ")}
+        </div>
+      )}
+
+      {conflict && (
+        <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          Conflict detected: reviewers chose different decisions for this suggestion.
+        </div>
       )}
 
       <div className="mt-4 flex gap-2">
@@ -589,6 +608,79 @@ function SuggestionCard({
       )}
 
       {status && <p className="mt-2 text-xs text-gray-500">{status}</p>}
+    </div>
+  );
+}
+
+function ConflictResolutionPanel({
+  conflicts,
+  currentUser,
+  onResolved,
+}: {
+  conflicts: CollaborationConflict[];
+  currentUser: string;
+  onResolved: () => void;
+}) {
+  const [status, setStatus] = useState("");
+
+  async function chooseConsensus(
+    conflict: CollaborationConflict,
+    decision: "approve" | "alter" | "reject"
+  ) {
+    setStatus("");
+    try {
+      await resolveConflict(conflict.id, {
+        reviewer: currentUser,
+        consensus_decision: decision,
+        comment: `Consensus resolved as ${decision}`,
+      });
+      await onResolved();
+    } catch (err) {
+      console.error(err);
+      setStatus("Could not resolve conflict.");
+    }
+  }
+
+  if (conflicts.length === 0) return null;
+
+  return (
+    <div className="mt-10 border-t border-gray-200 pt-6">
+      <h3 className="text-lg font-semibold text-gray-900">Conflict Resolution</h3>
+      <p className="text-sm text-gray-600 mt-1">
+        Conflicts appear when multiple reviewers make incompatible decisions on the same suggestion.
+      </p>
+
+      {status && <p className="mt-2 text-sm text-red-700">{status}</p>}
+
+      <div className="mt-4 space-y-3">
+        {conflicts.map((conflict) => (
+          <div key={conflict.id} className="bg-red-50 border border-red-200 rounded-xl p-4">
+            <p className="font-medium text-gray-900">{conflict.pattern_id}</p>
+
+            <div className="mt-2 space-y-1 text-sm text-gray-700">
+              {conflict.votes.map((vote) => (
+                <p key={vote.id}>
+                  <span className="font-medium">{vote.reviewer}</span>: {vote.decision}
+                  {vote.altered_action ? ` → ${vote.altered_action}` : ""}
+                  {vote.comment ? ` — ${vote.comment}` : ""}
+                </p>
+              ))}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {(["approve", "alter", "reject"] as const).map((decision) => (
+                <button
+                  key={decision}
+                  onClick={() => chooseConsensus(conflict, decision)}
+                  className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-xs font-medium hover:bg-gray-800"
+                >
+                  Consensus: {decision}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
