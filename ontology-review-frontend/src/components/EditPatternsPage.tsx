@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState, type LucideIcon } from "react";
 import {
   AlertTriangle,
   Check,
+  CornerUpRight,
+  FolderInput,
   GitBranch,
   GitMerge,
   Layers,
   Pencil,
   RefreshCw,
   Search,
+  Trash2,
   X,
 } from "lucide-react";
 import {
@@ -17,6 +20,21 @@ import {
   type PatternCategory,
   type PatternSuggestion,
 } from "../api/editPatternsApi";
+
+// Preset reviewer actions (mirrors ReviewerActions.tsx ACTION_OPTIONS)
+const ALTER_ACTIONS: {
+  kind: string;
+  label: string;
+  icon: LucideIcon;
+  requiredField?: { label: string; placeholder: string };
+}[] = [
+  { kind: "rename", label: "Rename", icon: Pencil, requiredField: { label: "New label", placeholder: "e.g. school_building" } },
+  { kind: "merge", label: "Merge", icon: GitMerge, requiredField: { label: "Target node ID", placeholder: "e.g. school.n.01" } },
+  { kind: "delete", label: "Delete", icon: Trash2 },
+  { kind: "add_parent", label: "Add Parent", icon: CornerUpRight, requiredField: { label: "Additional parent ID", placeholder: "e.g. building.n.01" } },
+  { kind: "place_elsewhere", label: "Place Elsewhere", icon: FolderInput, requiredField: { label: "New parent ID", placeholder: "e.g. structure.n.01" } },
+  { kind: "split", label: "Split", icon: GitBranch },
+];
 
 const ISSUE_META: Record<string, { icon: LucideIcon; active: string }> = {
   duplicate: { icon: GitMerge, active: "bg-blue-600 text-white" },
@@ -41,12 +59,15 @@ interface FinishedChange {
 
 export function EditPatternsPage({
   selectedNodeId,
+  currentUser,
 }: {
   selectedNodeId?: string | null;
+  currentUser: string;
 }) {
   const [categories, setCategories] = useState<PatternCategory[]>([]);
   const [activeKey, setActiveKey] = useState("duplicate");
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "unfinished" | "finished">("all");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [decisions, setDecisions] = useState<FinishedChange[]>([]);
@@ -103,29 +124,14 @@ export function EditPatternsPage({
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gray-50">
       <div className="shrink-0 bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="text-base font-semibold text-gray-900">
-              Editor
-            </h3>
-            <p className="text-sm text-gray-600 mt-0.5">
-              Select an edit type, review suggested cases, then accept, alter, or reject.
-              {selectedNodeId && (
-                <span className="ml-1 text-gray-400">
-                  Current tree node: {selectedNodeId}
-                </span>
-              )}
-            </p>
-          </div>
-
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50"
-          >
-            <RefreshCw size={15} />
-            Refresh
-          </button>
-        </div>
+        <p className="text-sm text-gray-500">
+          Select an edit type, review suggested cases, then accept, alter, or reject.
+          {selectedNodeId && (
+            <span className="ml-1 text-gray-400">
+              · Current tree node: {selectedNodeId}
+            </span>
+          )}
+        </p>
 
         <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1">
           {categories.map((category) => {
@@ -186,17 +192,48 @@ export function EditPatternsPage({
           })()}
         </div>
 
-        <div className="mt-4 relative max-w-lg">
-          <Search
-            size={15}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-          />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search within this edit type..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400"
-          />
+
+        <div className="mt-4 flex items-center gap-3">
+          <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 shrink-0">
+            {([
+              ["all", "All"],
+              ["unfinished", "Unfinished"],
+              ["finished", "Finished"],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                  statusFilter === key
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={load}
+            className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50 shrink-0"
+          >
+            <RefreshCw size={15} />
+            Refresh
+          </button>
+
+          <div className="relative flex-1 max-w-md ml-auto">
+            <Search
+              size={15}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search within this edit type..."
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400"
+            />
+          </div>
         </div>
       </div>
 
@@ -217,54 +254,61 @@ export function EditPatternsPage({
           </div>
         ) : (
           <div className="max-w-5xl mx-auto">
-            <div className="mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">
-                {isAll ? "All Edit Patterns" : activeCategory!.title}
-              </h3>
-              <p className="text-sm text-gray-600 mt-1">
-                {isAll
-                  ? "Every detected edit pattern across all issue types."
-                  : activeCategory!.description}
-              </p>
-            </div>
+            {statusFilter !== "finished" && (
+              <div className="mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {isAll ? "All Edit Patterns" : activeCategory!.title}
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  {isAll
+                    ? "Every detected edit pattern across all issue types."
+                    : activeCategory!.description}
+                </p>
+              </div>
+            )}
 
-            <div className="space-y-4">
-              {filteredSuggestions.length === 0 ? (
-                <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
-                  No suggestions found for this category.
-                </div>
-              ) : (
-                filteredSuggestions.map((suggestion) => (
-                  <SuggestionCard
-                    key={suggestion.id}
-                    suggestion={suggestion}
-                    onDecision={load}
-                  />
-                ))
-              )}
-            </div>
+            {statusFilter !== "finished" && (
+              <div className="space-y-4">
+                {filteredSuggestions.length === 0 ? (
+                  <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
+                    No suggestions found for this category.
+                  </div>
+                ) : (
+                  filteredSuggestions.map((suggestion) => (
+                    <SuggestionCard
+                      key={suggestion.id}
+                      suggestion={suggestion}
+                      currentUser={currentUser}
+                      onDecision={load}
+                    />
+                  ))
+                )}
+              </div>
+            )}
 
             {/* Finished Changes — human decisions already made */}
-            <div className="mt-10 border-t border-gray-200 pt-6">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Finished Changes
-              </h3>
-              <p className="text-sm text-gray-600 mt-1">
-                Decisions you've already made on the suggestions above.
-              </p>
+            {statusFilter !== "unfinished" && (
+              <div className={statusFilter === "finished" ? "" : "mt-10 border-t border-gray-200 pt-6"}>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Finished Changes
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Decisions you've already made on the suggestions above.
+                </p>
 
-              {decisions.length === 0 ? (
-                <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
-                  No finished changes yet.
-                </div>
-              ) : (
-                <div className="mt-4 space-y-2">
-                  {[...decisions].reverse().map((d) => (
-                    <FinishedChangeRow key={d.id} change={d} />
-                  ))}
-                </div>
-              )}
-            </div>
+                {decisions.length === 0 ? (
+                  <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
+                    No finished changes yet.
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-2">
+                    {[...decisions].reverse().map((d) => (
+                      <FinishedChangeRow key={d.id} change={d} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -274,14 +318,18 @@ export function EditPatternsPage({
 
 function SuggestionCard({
   suggestion,
+  currentUser,
   onDecision,
 }: {
   suggestion: PatternSuggestion;
+  currentUser: string;
   onDecision: () => void;
 }) {
   const [mode, setMode] = useState<"approve" | "alter" | "reject" | null>(null);
   const [comment, setComment] = useState("");
   const [alteredAction, setAlteredAction] = useState("");
+  const [actionKind, setActionKind] = useState<string | null>(null);
+  const [actionField, setActionField] = useState("");
   const [principleUpdate, setPrincipleUpdate] = useState("");
   const [status, setStatus] = useState("");
 
@@ -289,7 +337,7 @@ function SuggestionCard({
     try {
       await decideEditPattern(suggestion.id, {
         decision,
-        reviewer: "Sophia",
+        reviewer: currentUser,
         comment,
         altered_action: alteredAction,
         principle_update: principleUpdate,
@@ -304,6 +352,8 @@ function SuggestionCard({
       setMode(null);
       setComment("");
       setAlteredAction("");
+      setActionKind(null);
+      setActionField("");
       setPrincipleUpdate("");
       onDecision();
     } catch (err) {
@@ -397,12 +447,62 @@ function SuggestionCard({
       {mode && (
         <div className="mt-4 border border-gray-200 rounded-lg p-3 bg-gray-50">
           {mode === "alter" && (
-            <input
-              value={alteredAction}
-              onChange={(e) => setAlteredAction(e.target.value)}
-              placeholder="Altered action..."
-              className="w-full mb-2 text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400"
-            />
+            <div className="mb-3">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-2">
+                Choose an action
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {ALTER_ACTIONS.map((opt) => {
+                  const Icon = opt.icon;
+                  const selected = actionKind === opt.kind;
+                  return (
+                    <button
+                      key={opt.kind}
+                      onClick={() => {
+                        setActionKind(opt.kind);
+                        setActionField("");
+                        // record the chosen action label as the altered_action sent to backend
+                        setAlteredAction(opt.label);
+                      }}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm border transition-colors ${
+                        selected
+                          ? "border-gray-900 bg-white text-gray-900"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      <Icon size={14} />
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {(() => {
+                const selected = ALTER_ACTIONS.find((a) => a.kind === actionKind);
+                if (!selected?.requiredField) return null;
+                return (
+                  <div className="mt-3">
+                    <label className="block text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-1">
+                      {selected.requiredField.label}
+                    </label>
+                    <input
+                      value={actionField}
+                      onChange={(e) => {
+                        setActionField(e.target.value);
+                        // include the field value in altered_action, e.g. "Rename → school_building"
+                        setAlteredAction(
+                          e.target.value.trim()
+                            ? `${selected.label} → ${e.target.value.trim()}`
+                            : selected.label
+                        );
+                      }}
+                      placeholder={selected.requiredField.placeholder}
+                      className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                    />
+                  </div>
+                );
+              })()}
+            </div>
           )}
 
           <textarea

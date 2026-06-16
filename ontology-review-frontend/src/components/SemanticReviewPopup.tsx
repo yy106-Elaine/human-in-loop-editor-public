@@ -50,7 +50,7 @@ export function SemanticReviewPopup({
         </button>
 
         {/* content */}
-        <div className="max-h-[60vh] overflow-y-auto p-4 pr-8">
+        <div className="max-h-[60vh] overflow-y-auto overflow-x-hidden p-4 pr-8">
           {!info ? (
             <p className="text-sm text-gray-500">
               No semantic data found for{" "}
@@ -82,16 +82,16 @@ export function SemanticReviewPopup({
                   Current Parent(s)
                 </h4>
                 {parents.length > 0 ? (
-                  <p className="text-sm leading-relaxed text-gray-800">
+                  <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm leading-relaxed text-gray-800">
                     {parents.map((p, i) => (
-                      <span key={i}>
-                        {p}
+                      <span key={i} className="inline-flex items-center">
+                        <span className="break-all">{p}</span>
                         {i < parents.length - 1 && (
-                          <span className="mx-1 text-gray-400">→</span>
+                          <span className="ml-1 text-gray-400">→</span>
                         )}
                       </span>
                     ))}
-                  </p>
+                  </div>
                 ) : (
                   <p className="text-sm text-gray-500">—</p>
                 )}
