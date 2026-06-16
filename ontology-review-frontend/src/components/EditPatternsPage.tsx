@@ -17,6 +17,7 @@ import {
   decideEditPattern,
   getEditPatternDecisions,
   getGroupedPatterns,
+  getPrinciples,
   type PatternCategory,
   type PatternSuggestion,
 } from "../api/editPatternsApi";
@@ -44,6 +45,10 @@ const ISSUE_META: Record<string, { icon: LucideIcon; active: string }> = {
   naming: { icon: Pencil, active: "bg-pink-600 text-white" },
 };
 
+interface PrincipleOption {
+  id: string;
+  title: string;
+}
 const ALL_KEY = "__all__";
 
 interface FinishedChange {
@@ -331,7 +336,16 @@ function SuggestionCard({
   const [actionKind, setActionKind] = useState<string | null>(null);
   const [actionField, setActionField] = useState("");
   const [principleUpdate, setPrincipleUpdate] = useState("");
+  const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
+  const [linkPrincipleId, setLinkPrincipleId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
+
+  // load existing principles so the reviewer can link this edit to one
+  useEffect(() => {
+    getPrinciples()
+      .then((data) => setPrinciples(data.principles ?? []))
+      .catch(() => setPrinciples([]));
+  }, []);
 
   async function submit(decision: "approve" | "alter" | "reject") {
     try {
@@ -341,6 +355,7 @@ function SuggestionCard({
         comment,
         altered_action: alteredAction,
         principle_update: principleUpdate,
+        link_principle_id: linkPrincipleId ?? undefined,
         payload: {
           pattern_type: suggestion.pattern_type,
           suggested_action: suggestion.suggested_action,
@@ -355,6 +370,7 @@ function SuggestionCard({
       setActionKind(null);
       setActionField("");
       setPrincipleUpdate("");
+      setLinkPrincipleId(null);
       onDecision();
     } catch (err) {
       console.error(err);
@@ -513,6 +529,34 @@ function SuggestionCard({
             className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400 resize-none"
           />
 
+          {principles.length > 0 && (
+            <div className="mt-2">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-2">
+                Link to a principle (optional)
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {principles.map((p) => {
+                  const selected = linkPrincipleId === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      onClick={() =>
+                        setLinkPrincipleId(selected ? null : p.id)
+                      }
+                      className={`text-left px-3 py-1.5 rounded-md text-xs border transition-colors max-w-[260px] ${
+                        selected
+                          ? "border-blue-500 bg-blue-50 text-blue-800"
+                          : "border-gray-200 bg-white text-gray-600 hover:bg-gray-100"
+                      }`}
+                    >
+                      {p.title}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          
           <textarea
             value={principleUpdate}
             onChange={(e) => setPrincipleUpdate(e.target.value)}

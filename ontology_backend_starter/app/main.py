@@ -125,6 +125,7 @@ class PatternDecisionRequest(BaseModel):
     comment: Optional[str] = ""
     altered_action: Optional[str] = None
     principle_update: Optional[str] = None
+    link_principle_id: Optional[str] = None
     payload: Dict[str, Any] = {}
 
 
@@ -788,6 +789,16 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
         "created_at": now_iso(),
     }
     PATTERN_DECISIONS.append(record)
+
+    # If the reviewer linked this edit to an existing principle,
+    # add this pattern_id to that principle's examples (dedup).
+    if body.link_principle_id:
+        for p in PRINCIPLES:
+            if p["id"] == body.link_principle_id:
+                if pattern_id not in p["examples"]:
+                    p["examples"].append(pattern_id)
+                record["linked_principle_id"] = body.link_principle_id
+                break
 
     log_event(
         node_id=pattern_id,

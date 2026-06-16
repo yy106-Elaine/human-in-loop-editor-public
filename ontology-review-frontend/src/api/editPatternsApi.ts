@@ -72,6 +72,7 @@ export async function decideEditPattern(
     comment?: string;
     altered_action?: string;
     principle_update?: string;
+    link_principle_id?: string;
     payload?: Record<string, unknown>;
   }
 ) {
