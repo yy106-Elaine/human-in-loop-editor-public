@@ -45,6 +45,17 @@ const ISSUE_META: Record<string, { icon: LucideIcon; active: string }> = {
   naming: { icon: Pencil, active: "bg-pink-600 text-white" },
 };
 
+// Color coding per pattern_type — applied to suggestion cards and principle page.
+const PATTERN_COLORS: Record<string, { card: string; bar: string; actionText: string }> = {
+  duplicate: { card: "bg-blue-50 border-blue-200", bar: "bg-blue-500", actionText: "text-blue-700" },
+  virtual: { card: "bg-purple-50 border-purple-200", bar: "bg-purple-500", actionText: "text-purple-700" },
+  misplaced: { card: "bg-amber-50 border-amber-200", bar: "bg-amber-500", actionText: "text-amber-700" },
+  inheritance: { card: "bg-emerald-50 border-emerald-200", bar: "bg-emerald-500", actionText: "text-emerald-700" },
+  naming: { card: "bg-pink-50 border-pink-200", bar: "bg-pink-500", actionText: "text-pink-700" },
+};
+
+const DEFAULT_COLOR = { card: "bg-white border-gray-200", bar: "bg-gray-300", actionText: "text-gray-800" };
+
 interface PrincipleOption {
   id: string;
   title: string;
@@ -378,8 +389,11 @@ function SuggestionCard({
     }
   }
 
+  const colors = PATTERN_COLORS[suggestion.pattern_type ?? ""] ?? DEFAULT_COLOR;
+
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+    <div className={`relative overflow-hidden border rounded-xl shadow-sm p-4 pl-5 ${colors.card}`}>
+      <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${colors.bar}`} />
       <div className="flex items-start justify-between gap-4">
         <div>
           <h4 className="text-base font-semibold text-gray-900">
@@ -387,7 +401,7 @@ function SuggestionCard({
           </h4>
           <p className="text-sm text-gray-500 mt-1">
             Suggested action:{" "}
-            <span className="font-medium text-gray-800">
+            <span className={`font-semibold ${colors.actionText}`}>
               {suggestion.suggested_action}
             </span>
           </p>

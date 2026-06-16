@@ -2,6 +2,20 @@ import { useEffect, useState } from "react";
 import { BookOpen, ChevronDown, ChevronRight, Link2, Plus, RefreshCw } from "lucide-react";
 import { addPrinciple, getEditPatternDecisions, getPrinciples } from "../api/editPatternsApi";
 
+// Color coding per pattern_type (mirrors EditPatternsPage) — pattern_id looks like "duplicate::actor"
+const PATTERN_COLORS: Record<string, { chip: string; bar: string }> = {
+  duplicate: { chip: "bg-blue-100 text-blue-700", bar: "bg-blue-500" },
+  virtual: { chip: "bg-purple-100 text-purple-700", bar: "bg-purple-500" },
+  misplaced: { chip: "bg-amber-100 text-amber-700", bar: "bg-amber-500" },
+  inheritance: { chip: "bg-emerald-100 text-emerald-700", bar: "bg-emerald-500" },
+  naming: { chip: "bg-pink-100 text-pink-700", bar: "bg-pink-500" },
+};
+
+function patternColor(patternId: string) {
+  const type = patternId.split("::")[0];
+  return PATTERN_COLORS[type] ?? { chip: "bg-gray-100 text-gray-600", bar: "bg-gray-300" };
+}
+
 interface Principle {
   id: string;
   title: string;
@@ -103,14 +117,21 @@ export function PrinciplesPage() {
                             No concrete edits linked to this principle yet.
                           </p>
                         ) : (
-                          relatedEdits.map((d) => (
+                          relatedEdits.map((d) => {
+                            const pc = patternColor(d.pattern_id);
+                            const ptype = d.pattern_id.split("::")[0];
+                            return (
                             <div
                               key={d.id}
-                              className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
+                              className="relative overflow-hidden rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 pl-4"
                             >
+                              <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${pc.bar}`} />
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-sm font-medium text-gray-900 truncate">
-                                  {d.pattern_id}
+                                <span className="text-sm font-medium text-gray-900 inline-flex items-center gap-1.5 flex-wrap min-w-0">
+                                  <span className="truncate">{d.pattern_id}</span>
+                                  <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${pc.chip}`}>
+                                    {ptype}
+                                  </span>
                                 </span>
                                 <span className="text-xs px-2 py-0.5 rounded bg-white border border-gray-200 text-gray-600 shrink-0">
                                   {d.decision}
@@ -125,7 +146,8 @@ export function PrinciplesPage() {
                                 <p className="text-xs text-gray-600 mt-1">{d.comment}</p>
                               )}
                             </div>
-                          ))
+                            );
+                          })
                         )}
                       </div>
                     )}
@@ -152,11 +174,17 @@ export function PrinciplesPage() {
             <div className="space-y-3">
               {decisions.slice().reverse().map((d) => {
                 const isLinked = linkedPatternIds.has(d.pattern_id);
+                const pc = patternColor(d.pattern_id);
+                const ptype = d.pattern_id.split("::")[0];
                 return (
-                  <div key={d.id} className="border border-gray-200 rounded-lg p-3 text-sm">
+                  <div key={d.id} className="relative overflow-hidden border border-gray-200 rounded-lg p-3 pl-4 text-sm">
+                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${pc.bar}`} />
                     <div className="flex justify-between gap-2">
-                      <span className="font-medium text-gray-900 inline-flex items-center gap-1.5">
+                      <span className="font-medium text-gray-900 inline-flex items-center gap-1.5 flex-wrap">
                         {d.pattern_id}
+                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${pc.chip}`}>
+                          {ptype}
+                        </span>
                         {isLinked && (
                           <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
                             <Link2 size={10} />
