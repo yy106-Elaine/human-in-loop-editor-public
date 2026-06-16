@@ -843,9 +843,15 @@ def get_principles():
     return {"principles": PRINCIPLES}
 
 
+class AddPrincipleRequest(BaseModel):
+    principle_update: Optional[str] = None
+    comment: Optional[str] = None
+    examples: List[str] = []
+
+
 @app.post("/principles")
-def add_principle(body: PatternDecisionRequest):
-    """Manually add a shared editing principle."""
+def add_principle(body: AddPrincipleRequest):
+    """Manually add a shared editing principle, optionally linking existing edits."""
     text = (body.principle_update or body.comment or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="principle_update or comment is required")
@@ -855,7 +861,7 @@ def add_principle(body: PatternDecisionRequest):
         "title": "Human-added principle",
         "body": text,
         "source": "manual",
-        "examples": [],
+        "examples": list(dict.fromkeys(body.examples or [])),  # dedup, keep order
         "created_at": now_iso(),
     }
     PRINCIPLES.append(principle)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { BookOpen, ChevronDown, ChevronRight, Link2, Plus, RefreshCw } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Plus, RefreshCw } from "lucide-react";
 import { addPrinciple, getEditPatternDecisions, getPrinciples } from "../api/editPatternsApi";
 
 // Color coding per pattern_type (mirrors EditPatternsPage) — pattern_id looks like "duplicate::actor"
@@ -38,11 +38,9 @@ export function PrinciplesPage() {
   const [decisions, setDecisions] = useState<DecisionRecord[]>([]);
   const [newPrinciple, setNewPrinciple] = useState("");
   const [status, setStatus] = useState("");
+  const [editSearch, setEditSearch] = useState("");
+  const [selectedExamples, setSelectedExamples] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  // set of all pattern_ids that are linked to at least one principle
-  const linkedPatternIds = new Set(
-    principles.flatMap((p) => p.examples ?? [])
-  );
 
   async function load() {
     setStatus("");
@@ -61,8 +59,10 @@ export function PrinciplesPage() {
   async function submitPrinciple() {
     if (!newPrinciple.trim()) return;
     try {
-      await addPrinciple(newPrinciple.trim());
+      await addPrinciple(newPrinciple.trim(), selectedExamples);
       setNewPrinciple("");
+      setSelectedExamples([]);
+      setEditSearch("");
       await load();
     } catch {
       setStatus("Could not add principle.");
@@ -83,8 +83,8 @@ export function PrinciplesPage() {
 
       {status && <div className="px-6 py-2 text-sm text-red-700 bg-red-50">{status}</div>}
 
-      <div className="p-6 grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-6">
-        <div className="space-y-4">
+      <div className="p-6">
+        <div className="max-w-4xl mx-auto space-y-4">
           {principles.map((p) => {
             const exampleIds = p.examples ?? [];
             const relatedEdits = decisions.filter((d) => exampleIds.includes(d.pattern_id));
@@ -159,49 +159,106 @@ export function PrinciplesPage() {
 
           <div className="bg-white border border-gray-200 rounded-xl p-4">
             <h3 className="text-sm font-semibold text-gray-900 mb-2">Add principle manually</h3>
-            <textarea value={newPrinciple} onChange={(e) => setNewPrinciple(e.target.value)} rows={3} placeholder="Example: When duplicate labels use different synsets, prefer disambiguating labels over merging unless context proves the same concept." className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 resize-none" />
-            <button onClick={submitPrinciple} disabled={!newPrinciple.trim()} className="mt-2 inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white disabled:bg-gray-300">
+            <textarea
+              value={newPrinciple}
+              onChange={(e) => setNewPrinciple(e.target.value)}
+              rows={3}
+              placeholder="Example: When duplicate labels use different synsets, prefer disambiguating labels over merging unless context proves the same concept."
+              className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 resize-none"
+            />
+
+            {/* Link existing edits as examples */}
+            <div className="mt-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">
+                Link edits as examples (optional)
+              </p>
+              <input
+                value={editSearch}
+                onChange={(e) => setEditSearch(e.target.value)}
+                placeholder="Search edits by id (e.g. duplicate, actor)..."
+                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 mb-2 focus:outline-none focus:ring-1 focus:ring-gray-400"
+              />
+
+              {selectedExamples.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {selectedExamples.map((id) => (
+                    <span
+                      key={id}
+                      className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-blue-50 text-blue-700"
+                    >
+                      {id}
+                      <button
+                        onClick={() =>
+                          setSelectedExamples((prev) => prev.filter((x) => x !== id))
+                        }
+                        className="hover:text-blue-900"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                {decisions.length === 0 ? (
+                  <p className="text-xs text-gray-500 p-3">
+                    No finished edits yet. Make a decision in the Editor first.
+                  </p>
+                ) : (
+                  decisions
+                    .filter((d) => {
+                      const q = editSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        d.pattern_id.toLowerCase().includes(q) ||
+                        d.decision.toLowerCase().includes(q)
+                      );
+                    })
+                    .map((d) => {
+                      const checked = selectedExamples.includes(d.pattern_id);
+                      const pc = patternColor(d.pattern_id);
+                      const ptype = d.pattern_id.split("::")[0];
+                      return (
+                        <label
+                          key={d.id}
+                          className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-gray-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setSelectedExamples((prev) =>
+                                checked
+                                  ? prev.filter((x) => x !== d.pattern_id)
+                                  : [...prev, d.pattern_id]
+                              )
+                            }
+                          />
+                          <span className="font-medium text-gray-900 truncate">
+                            {d.pattern_id}
+                          </span>
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${pc.chip}`}>
+                            {ptype}
+                          </span>
+                          <span className="ml-auto text-xs text-gray-500 shrink-0">
+                            {d.decision}
+                          </span>
+                        </label>
+                      );
+                    })
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={submitPrinciple}
+              disabled={!newPrinciple.trim()}
+              className="mt-3 inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-gray-900 text-white disabled:bg-gray-300"
+            >
               <Plus size={15} /> Add Principle
             </button>
           </div>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3">Concrete edits feeding principles</h3>
-          {decisions.length === 0 ? (
-            <p className="text-sm text-gray-500">No edit-pattern decisions yet. Accept or alter a duplicate/virtual-node suggestion to populate this log.</p>
-          ) : (
-            <div className="space-y-3">
-              {decisions.slice().reverse().map((d) => {
-                const isLinked = linkedPatternIds.has(d.pattern_id);
-                const pc = patternColor(d.pattern_id);
-                const ptype = d.pattern_id.split("::")[0];
-                return (
-                  <div key={d.id} className="relative overflow-hidden border border-gray-200 rounded-lg p-3 pl-4 text-sm">
-                    <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${pc.bar}`} />
-                    <div className="flex justify-between gap-2">
-                      <span className="font-medium text-gray-900 inline-flex items-center gap-1.5 flex-wrap">
-                        {d.pattern_id}
-                        <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${pc.chip}`}>
-                          {ptype}
-                        </span>
-                        {isLinked && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
-                            <Link2 size={10} />
-                            linked
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600 shrink-0">{d.decision}</span>
-                    </div>
-                    {d.comment && <p className="text-gray-600 mt-1">{d.comment}</p>}
-                    {d.altered_action && <p className="text-gray-500 mt-1 text-xs">altered action: {d.altered_action}</p>}
-                    {d.principle_added && <p className="mt-2 text-xs text-blue-700 bg-blue-50 rounded p-2">Added principle: {d.principle_added.body}</p>}
-                  </div>
-                );
-              })}
-            </div>
-          )}
         </div>
       </div>
     </div>
