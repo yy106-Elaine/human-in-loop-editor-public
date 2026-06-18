@@ -26,7 +26,6 @@ import {
   type PatternSuggestion,
 } from "../api/editPatternsApi";
 
-// Preset reviewer actions (mirrors ReviewerActions.tsx ACTION_OPTIONS)
 const ALTER_ACTIONS: {
   kind: string;
   label: string;
@@ -49,7 +48,6 @@ const ISSUE_META: Record<string, { icon: LucideIcon; active: string }> = {
   naming: { icon: Pencil, active: "bg-pink-600 text-white" },
 };
 
-// Color coding per pattern_type — applied to suggestion cards and principle page.
 const PATTERN_COLORS: Record<string, { card: string; bar: string; actionText: string }> = {
   duplicate: { card: "bg-blue-50 border-blue-200", bar: "bg-blue-500", actionText: "text-blue-700" },
   virtual: { card: "bg-purple-50 border-purple-200", bar: "bg-purple-500", actionText: "text-purple-700" },
@@ -64,7 +62,10 @@ interface PrincipleOption {
   id: string;
   title: string;
 }
+
 const ALL_KEY = "__all__";
+
+type StatusFilter = "all" | "unfinished" | "finished" | "conflicts";
 
 export function EditPatternsPage({
   selectedNodeId,
@@ -76,7 +77,7 @@ export function EditPatternsPage({
   const [categories, setCategories] = useState<PatternCategory[]>([]);
   const [activeKey, setActiveKey] = useState("duplicate");
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "unfinished" | "finished">("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [decisions, setDecisions] = useState<FinishedChange[]>([]);
@@ -115,14 +116,14 @@ export function EditPatternsPage({
 
   const isAll = activeKey === ALL_KEY;
   const activeCategory = categories.find((c) => c.key === activeKey);
+  const openConflicts = conflicts.filter((c) => c.status === "open");
 
   const filteredSuggestions = useMemo(() => {
-    // when ALL is selected, merge suggestions across every category
     const suggestions = isAll
       ? categories.flatMap((c) => c.suggestions)
       : activeCategory?.suggestions ?? [];
-    const q = query.trim().toLowerCase();
 
+    const q = query.trim().toLowerCase();
     if (!q) return suggestions;
 
     return suggestions.filter((suggestion) =>
@@ -171,13 +172,13 @@ export function EditPatternsPage({
             );
           })}
 
-          {/* ALL tab — shows every category's suggestions combined */}
           {categories.length > 0 && (() => {
             const active = activeKey === ALL_KEY;
             const totalCount = categories.reduce(
               (sum, c) => sum + c.suggestions.length,
               0
             );
+
             return (
               <button
                 onClick={() => setActiveKey(ALL_KEY)}
@@ -201,20 +202,22 @@ export function EditPatternsPage({
           })()}
         </div>
 
-
         <div className="mt-4 flex items-center gap-3">
           <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 shrink-0">
             {([
               ["all", "All"],
               ["unfinished", "Unfinished"],
               ["finished", "Finished"],
+              ["conflicts", `Conflicts${openConflicts.length ? ` (${openConflicts.length})` : ""}`],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => setStatusFilter(key)}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
                   statusFilter === key
-                    ? "bg-white text-gray-900 shadow-sm"
+                    ? key === "conflicts"
+                      ? "bg-red-50 text-red-700 shadow-sm"
+                      : "bg-white text-gray-900 shadow-sm"
                     : "text-gray-600 hover:text-gray-900"
                 }`}
               >
@@ -263,70 +266,73 @@ export function EditPatternsPage({
           </div>
         ) : (
           <div className="max-w-5xl mx-auto">
-            {statusFilter !== "finished" && (
-              <div className="mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">
-                  {isAll ? "All Edit Patterns" : activeCategory!.title}
-                </h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  {isAll
-                    ? "Every detected edit pattern across all issue types."
-                    : activeCategory!.description}
-                </p>
-              </div>
-            )}
-
-            {statusFilter !== "finished" && (
-              <div className="space-y-4">
-                {filteredSuggestions.length === 0 ? (
-                  <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
-                    No suggestions found for this category.
-                  </div>
-                ) : (
-                  filteredSuggestions.map((suggestion) => (
-                    <SuggestionCard
-                      key={suggestion.id}
-                      suggestion={suggestion}
-                      currentUser={currentUser}
-                      decisions={decisions.filter((d) => d.pattern_id === suggestion.id)}
-                      conflict={conflicts.find(
-                        (c) => c.pattern_id === suggestion.id && c.status === "open"
-                      )}
-                      onDecision={load}
-                    />
-                  ))
-                )}
-              </div>
-            )}
-
-            <ConflictResolutionPanel
-              conflicts={conflicts.filter((c) => c.status === "open")}
-              currentUser={currentUser}
-              onResolved={load}
-            />
-
-            {/* Finished Changes — human decisions already made */}
-            {statusFilter !== "unfinished" && (
-              <div className={statusFilter === "finished" ? "" : "mt-10 border-t border-gray-200 pt-6"}>
-                <h3 className="text-lg font-semibold text-gray-900">
-                  Finished Changes
-                </h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  Decisions you've already made on the suggestions above.
-                </p>
-
-                {decisions.length === 0 ? (
-                  <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
-                    No finished changes yet.
-                  </div>
-                ) : (
-                  <div className="mt-4 space-y-2">
-                    {[...decisions].reverse().map((d) => (
-                      <FinishedChangeRow key={d.id} change={d} />
-                    ))}
+            {statusFilter === "conflicts" ? (
+              <ConflictResolutionPanel
+                conflicts={openConflicts}
+                currentUser={currentUser}
+                onResolved={load}
+              />
+            ) : (
+              <>
+                {statusFilter !== "finished" && (
+                  <div className="mb-4">
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      {isAll ? "All Edit Patterns" : activeCategory!.title}
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {isAll
+                        ? "Every detected edit pattern across all issue types."
+                        : activeCategory!.description}
+                    </p>
                   </div>
                 )}
-              </div>
+
+                {statusFilter !== "finished" && (
+                  <div className="space-y-4">
+                    {filteredSuggestions.length === 0 ? (
+                      <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
+                        No suggestions found for this category.
+                      </div>
+                    ) : (
+                      filteredSuggestions.map((suggestion) => (
+                        <SuggestionCard
+                          key={suggestion.id}
+                          suggestion={suggestion}
+                          currentUser={currentUser}
+                          decisions={decisions.filter((d) => d.pattern_id === suggestion.id)}
+                          conflict={conflicts.find(
+                            (c) => c.pattern_id === suggestion.id && c.status === "open"
+                          )}
+                          onDecision={load}
+                        />
+                      ))
+                    )}
+                  </div>
+                )}
+
+                {statusFilter !== "unfinished" && (
+                  <div className={statusFilter === "finished" ? "" : "mt-10 border-t border-gray-200 pt-6"}>
+                    <h3 className="text-lg font-semibold text-gray-900">
+                      Finished Changes
+                    </h3>
+                    <p className="text-sm text-gray-600 mt-1">
+                      Decisions already made on the suggestions above.
+                    </p>
+
+                    {decisions.length === 0 ? (
+                      <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
+                        No finished changes yet.
+                      </div>
+                    ) : (
+                      <div className="mt-4 space-y-2">
+                        {[...decisions].reverse().map((d) => (
+                          <FinishedChangeRow key={d.id} change={d} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -358,7 +364,6 @@ function SuggestionCard({
   const [linkPrincipleId, setLinkPrincipleId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
 
-  // load existing principles so the reviewer can link this edit to one
   useEffect(() => {
     getPrinciples()
       .then((data) => setPrinciples(data.principles ?? []))
@@ -401,6 +406,7 @@ function SuggestionCard({
   return (
     <div className={`relative overflow-hidden border rounded-xl shadow-sm p-4 pl-5 ${colors.card}`}>
       <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${colors.bar}`} />
+
       <div className="flex items-start justify-between gap-4">
         <div>
           <h4 className="text-base font-semibold text-gray-900">
@@ -504,13 +510,13 @@ function SuggestionCard({
                 {ALTER_ACTIONS.map((opt) => {
                   const Icon = opt.icon;
                   const selected = actionKind === opt.kind;
+
                   return (
                     <button
                       key={opt.kind}
                       onClick={() => {
                         setActionKind(opt.kind);
                         setActionField("");
-                        // record the chosen action label as the altered_action sent to backend
                         setAlteredAction(opt.label);
                       }}
                       className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm border transition-colors ${
@@ -529,6 +535,7 @@ function SuggestionCard({
               {(() => {
                 const selected = ALTER_ACTIONS.find((a) => a.kind === actionKind);
                 if (!selected?.requiredField) return null;
+
                 return (
                   <div className="mt-3">
                     <label className="block text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-1">
@@ -538,7 +545,6 @@ function SuggestionCard({
                       value={actionField}
                       onChange={(e) => {
                         setActionField(e.target.value);
-                        // include the field value in altered_action, e.g. "Rename → school_building"
                         setAlteredAction(
                           e.target.value.trim()
                             ? `${selected.label} → ${e.target.value.trim()}`
@@ -570,12 +576,11 @@ function SuggestionCard({
               <div className="flex flex-wrap gap-2">
                 {principles.map((p) => {
                   const selected = linkPrincipleId === p.id;
+
                   return (
                     <button
                       key={p.id}
-                      onClick={() =>
-                        setLinkPrincipleId(selected ? null : p.id)
-                      }
+                      onClick={() => setLinkPrincipleId(selected ? null : p.id)}
                       className={`text-left px-3 py-1.5 rounded-md text-xs border transition-colors max-w-[260px] ${
                         selected
                           ? "border-blue-500 bg-blue-50 text-blue-800"
@@ -589,7 +594,7 @@ function SuggestionCard({
               </div>
             </div>
           )}
-          
+
           <textarea
             value={principleUpdate}
             onChange={(e) => setPrincipleUpdate(e.target.value)}
@@ -628,6 +633,7 @@ function ConflictResolutionPanel({
     decision: "approve" | "alter" | "reject"
   ) {
     setStatus("");
+
     try {
       await resolveConflict(conflict.id, {
         reviewer: currentUser,
@@ -641,46 +647,50 @@ function ConflictResolutionPanel({
     }
   }
 
-  if (conflicts.length === 0) return null;
-
   return (
-    <div className="mt-10 border-t border-gray-200 pt-6">
-      <h3 className="text-lg font-semibold text-gray-900">Conflict Resolution</h3>
+    <div>
+      <h3 className="text-lg font-semibold text-gray-900">Conflicts</h3>
       <p className="text-sm text-gray-600 mt-1">
-        Conflicts appear when multiple reviewers make incompatible decisions on the same suggestion.
+        Resolve cases where multiple reviewers made incompatible decisions on the same suggestion.
       </p>
 
       {status && <p className="mt-2 text-sm text-red-700">{status}</p>}
 
-      <div className="mt-4 space-y-3">
-        {conflicts.map((conflict) => (
-          <div key={conflict.id} className="bg-red-50 border border-red-200 rounded-xl p-4">
-            <p className="font-medium text-gray-900">{conflict.pattern_id}</p>
+      {conflicts.length === 0 ? (
+        <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
+          No open conflicts.
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {conflicts.map((conflict) => (
+            <div key={conflict.id} className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <p className="font-medium text-gray-900">{conflict.pattern_id}</p>
 
-            <div className="mt-2 space-y-1 text-sm text-gray-700">
-              {conflict.votes.map((vote) => (
-                <p key={vote.id}>
-                  <span className="font-medium">{vote.reviewer}</span>: {vote.decision}
-                  {vote.altered_action ? ` → ${vote.altered_action}` : ""}
-                  {vote.comment ? ` — ${vote.comment}` : ""}
-                </p>
-              ))}
-            </div>
+              <div className="mt-2 space-y-1 text-sm text-gray-700">
+                {conflict.votes.map((vote) => (
+                  <p key={vote.id}>
+                    <span className="font-medium">{vote.reviewer}</span>: {vote.decision}
+                    {vote.altered_action ? ` → ${vote.altered_action}` : ""}
+                    {vote.comment ? ` — ${vote.comment}` : ""}
+                  </p>
+                ))}
+              </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              {(["approve", "alter", "reject"] as const).map((decision) => (
-                <button
-                  key={decision}
-                  onClick={() => chooseConsensus(conflict, decision)}
-                  className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-xs font-medium hover:bg-gray-800"
-                >
-                  Consensus: {decision}
-                </button>
-              ))}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(["approve", "alter", "reject"] as const).map((decision) => (
+                  <button
+                    key={decision}
+                    onClick={() => chooseConsensus(conflict, decision)}
+                    className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-xs font-medium hover:bg-gray-800"
+                  >
+                    Consensus: {decision}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -691,6 +701,7 @@ function FinishedChangeRow({ change }: { change: FinishedChange }) {
     alter: "bg-amber-100 text-amber-700",
     reject: "bg-red-100 text-red-700",
   };
+
   const title = change.payload?.title || change.pattern_id;
   const when = change.created_at
     ? new Date(change.created_at).toLocaleString()
@@ -706,6 +717,7 @@ function FinishedChangeRow({ change }: { change: FinishedChange }) {
           {change.altered_action && ` · → ${change.altered_action}`}
         </p>
       </div>
+
       <span
         className={`shrink-0 text-xs font-medium px-2 py-1 rounded ${
           decisionStyle[change.decision] ?? "bg-gray-100 text-gray-600"

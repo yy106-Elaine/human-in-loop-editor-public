@@ -1,11 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { SemanticReviewPopup } from "./SemanticReviewPopup";
-import {
-  ChevronRight,
-  ChevronDown,
-  Search,
-} from "lucide-react";
+import { ChevronRight, ChevronDown, Search } from "lucide-react";
 import { type OntologyNode, type NodeStatus } from "./ontologyData";
+import { type PatternType } from "../api/editPatternsApi";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -23,29 +20,35 @@ function toOntologyNode(n: BackendNode): OntologyNode {
     label: n.label,
     status: n.status,
     synset: n.code ?? undefined,
-    children:
-      n.children && n.children.length
-        ? n.children.map(toOntologyNode)
-        : undefined,
+    children: n.children && n.children.length ? n.children.map(toOntologyNode) : undefined,
   };
 }
+
+const ERROR_META: Record<PatternType, { label: string; dot: string; row: string }> = {
+  duplicate: { label: "Duplicate", dot: "bg-blue-500", row: "bg-blue-50 border-blue-200" },
+  virtual: { label: "Virtual", dot: "bg-purple-500", row: "bg-purple-50 border-purple-200" },
+  misplaced: { label: "Misplaced", dot: "bg-amber-500", row: "bg-amber-50 border-amber-200" },
+  inheritance: { label: "Multiple Inheritance", dot: "bg-emerald-500", row: "bg-emerald-50 border-emerald-200" },
+  naming: { label: "Naming", dot: "bg-pink-500", row: "bg-pink-50 border-pink-200" },
+};
+
+const statusColors: Record<NodeStatus, string> = {
+  conflict: "bg-red-500",
+  ambiguous: "bg-yellow-500",
+  inheritance: "bg-emerald-500",
+  suggestion: "bg-blue-500",
+  approved: "bg-green-500",
+  none: "bg-gray-300",
+};
 
 interface TreeNodeProps {
   node: OntologyNode;
   level: number;
   selectedId: string | null;
   onSelect: (node: OntologyNode, e: React.MouseEvent) => void;
-  expandedOverride: Set<string> | null; // when searching, force-expand these
+  expandedOverride: Set<string> | null;
+  errorHighlights: Record<string, PatternType>;
 }
-
-const statusColors: Record<NodeStatus, string> = {
-  conflict: "bg-red-500",
-  ambiguous: "bg-yellow-500",
-  inheritance: "bg-purple-500",
-  suggestion: "bg-blue-500",
-  approved: "bg-green-500",
-  none: "bg-gray-300",
-};
 
 function TreeNode({
   node,
@@ -53,67 +56,71 @@ function TreeNode({
   selectedId,
   onSelect,
   expandedOverride,
+  errorHighlights,
 }: TreeNodeProps) {
-  const [isExpandedLocal, setIsExpandedLocal] = useState(
-    level === 0,
-  );
-  const hasChildren =
-    !!node.children && node.children.length > 0;
-
-  // While searching, expansion is controlled by the override set.
-  const isExpanded = expandedOverride
-    ? expandedOverride.has(node.id)
-    : isExpandedLocal;
+  const [isExpandedLocal, setIsExpandedLocal] = useState(level === 0);
+  const hasChildren = !!node.children && node.children.length > 0;
+  const isExpanded = expandedOverride ? expandedOverride.has(node.id) : isExpandedLocal;
+  const errorType = errorHighlights[node.id];
+  const errorMeta = errorType ? ERROR_META[errorType] : null;
 
   return (
     <div>
       <div
-        className={`flex items-center gap-2 py-1.5 px-2 cursor-pointer hover:bg-gray-50 rounded ${
-          selectedId === node.id ? "bg-blue-50" : ""
+        className={`flex items-center gap-2 py-1.5 px-2 cursor-pointer hover:bg-gray-50 rounded border ${
+          selectedId === node.id
+            ? "bg-gray-900 text-white border-gray-900"
+            : errorMeta
+              ? errorMeta.row
+              : "border-transparent"
         }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
         onClick={(e) => onSelect(node, e)}
+        title={errorType ? `${ERROR_META[errorType].label} issue` : undefined}
       >
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (!expandedOverride)
-              setIsExpandedLocal((v) => !v);
+            if (!expandedOverride) setIsExpandedLocal((v) => !v);
           }}
-          className="w-4 h-4 flex items-center justify-center text-gray-500"
+          className={`w-4 h-4 flex items-center justify-center ${
+            selectedId === node.id ? "text-white" : "text-gray-500"
+          }`}
         >
           {hasChildren ? (
-            isExpanded ? (
-              <ChevronDown size={14} />
-            ) : (
-              <ChevronRight size={14} />
-            )
+            isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
           ) : (
             <span className="w-4" />
           )}
         </button>
+
         <div
-          className={`w-2 h-2 rounded-full shrink-0 ${statusColors[node.status]}`}
+          className={`w-2 h-2 rounded-full shrink-0 ${
+            errorMeta ? errorMeta.dot : statusColors[node.status]
+          }`}
         />
-        <span className="text-sm text-gray-900">
+        <span className={`text-sm truncate ${selectedId === node.id ? "text-white" : "text-gray-900"}`}>
           {node.label}
         </span>
         {node.synset && (
-          <span className="text-xs text-gray-500">
+          <span className={`text-xs shrink-0 ${selectedId === node.id ? "text-gray-200" : "text-gray-500"}`}>
             ({node.synset})
           </span>
         )}
-        {node.virtual && (
-          <span className="text-[10px] px-1 rounded bg-purple-100 text-purple-700">
-            v
+        {errorType && (
+          <span
+            className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
+              selectedId === node.id ? "bg-white/20 text-white" : "bg-white/70 text-gray-700"
+            }`}
+          >
+            {ERROR_META[errorType].label}
           </span>
         )}
-        {node.verb && (
-          <span className="text-[10px] text-gray-400 truncate">
-            → {node.verb}
-          </span>
+        {node.virtual && (
+          <span className="text-[10px] px-1 rounded bg-purple-100 text-purple-700">v</span>
         )}
       </div>
+
       {hasChildren && isExpanded && (
         <div>
           {node.children!.map((child) => (
@@ -124,6 +131,7 @@ function TreeNode({
               selectedId={selectedId}
               onSelect={onSelect}
               expandedOverride={expandedOverride}
+              errorHighlights={errorHighlights}
             />
           ))}
         </div>
@@ -132,62 +140,76 @@ function TreeNode({
   );
 }
 
-/** Return a filtered copy of the tree containing only nodes that match `q`
- *  (or have a matching descendant), plus the set of ids to keep expanded. */
 function filterTree(
   root: OntologyNode,
   q: string,
+  errorHighlights: Record<string, PatternType>,
+  activeErrorFilter: PatternType | "all" | null
 ): { tree: OntologyNode | null; expand: Set<string> } {
   const expand = new Set<string>();
   const needle = q.trim().toLowerCase();
-  if (!needle) return { tree: root, expand };
 
   function walk(node: OntologyNode): OntologyNode | null {
-    const selfMatch =
+    const textMatch =
+      !needle ||
       node.label.toLowerCase().includes(needle) ||
       (node.synset ?? "").toLowerCase().includes(needle);
+
+    const errorType = errorHighlights[node.id];
+    const errorMatch =
+      !activeErrorFilter ||
+      activeErrorFilter === "all" ||
+      errorType === activeErrorFilter;
+
     const kids = (node.children ?? [])
       .map(walk)
       .filter(Boolean) as OntologyNode[];
-    if (selfMatch || kids.length) {
+
+    if ((textMatch && errorMatch) || kids.length) {
       if (kids.length) expand.add(node.id);
       return {
         ...node,
-        children: kids.length
-          ? kids
-          : node.children && selfMatch
-            ? node.children
-            : undefined,
+        children: kids.length ? kids : node.children && textMatch ? node.children : undefined,
       };
     }
+
     return null;
   }
+
   return { tree: walk(root), expand };
 }
 
 export function OntologyTree({
   onNodeSelect,
+  errorHighlights = {},
+  activeErrorFilter,
+  onErrorFilterChange,
 }: {
   onNodeSelect: (id: string) => void;
+  errorHighlights?: Record<string, PatternType>;
+  activeErrorFilter?: PatternType | "all" | null;
+  onErrorFilterChange?: (filter: PatternType | "all" | null) => void;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(
-    null,
-  );
-  const [popup, setPopup] = useState<{
-    synset?: string | null;
-    label: string;
-    x: number;
-    y: number;
-  } | null>(null);
-  const [active, setActive] = useState<string>("physical"); // active subontology tab
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [popup, setPopup] = useState<{ synset?: string | null; label: string; x: number; y: number } | null>(null);
+  const [active, setActive] = useState<string>("physical");
   const [query, setQuery] = useState("");
-  
   const [ontology, setOntology] = useState<Record<string, OntologyNode>>({});
-  const [subontologies, setSubontologies] = useState <
-    { id: string; label: string }[]
-  >([]);
+  const [subontologies, setSubontologies] = useState<{ id: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const counts = useMemo(() => {
+    const base: Record<PatternType, number> = {
+      duplicate: 0,
+      virtual: 0,
+      misplaced: 0,
+      inheritance: 0,
+      naming: 0,
+    };
+    for (const type of Object.values(errorHighlights)) base[type] += 1;
+    return base;
+  }, [errorHighlights]);
 
   useEffect(() => {
     let cancelled = false;
@@ -221,33 +243,31 @@ export function OntologyTree({
 
   const handleSelect = (node: OntologyNode, e: React.MouseEvent) => {
     setSelectedId(node.id);
-    onNodeSelect(node.id); // keep teammate's center/right panels working as before
+    onNodeSelect(node.id);
 
-    // position popup to the right of the clicked row, vertically centered on it
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setPopup({
       synset: node.synset,
       label: node.label,
-      x: rect.right + 12, // 12px gap to the right of the node row
-      y: rect.top + rect.height / 2, // vertical center of the node row
+      x: rect.right + 12,
+      y: rect.top + rect.height / 2,
     });
   };
 
   const root = ontology[active];
   const { tree, expand } = useMemo(
-    () => (root ? filterTree(root, query) : { tree: null, expand: new Set<string>() }),
-    [root, query],
+    () => root
+      ? filterTree(root, query, errorHighlights, activeErrorFilter ?? null)
+      : { tree: null, expand: new Set<string>() },
+    [root, query, errorHighlights, activeErrorFilter]
   );
-  const searching = query.trim().length > 0;
+  const filtering = query.trim().length > 0 || !!activeErrorFilter;
 
   return (
     <div className="h-full bg-white border-r border-gray-200 overflow-y-auto flex flex-col">
-      {/* Header + filter tabs (top of the LEFT panel) */}
       <div className="p-4 border-b border-gray-200">
-        <h2 className="text-sm font-semibold text-gray-900 mb-3">
-          Ontology Structure
-        </h2>
-        <div className="flex gap-1 mb-3">
+        <h2 className="text-sm font-semibold text-gray-900 mb-3">Ontology Structure</h2>
+        <div className="flex gap-1 mb-3 overflow-x-auto">
           {subontologies.map((s) => (
             <button
               key={s.id}
@@ -266,10 +286,7 @@ export function OntologyTree({
           ))}
         </div>
         <div className="relative">
-          <Search
-            size={14}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400"
-          />
+          <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -279,14 +296,11 @@ export function OntologyTree({
         </div>
       </div>
 
-      {/* Tree */}
       <div className="p-2 flex-1">
         {loading ? (
           <div className="text-xs text-gray-400 p-4">Loading…</div>
         ) : error ? (
-          <div className="text-xs text-red-500 p-4">
-            Failed to load: {error}
-          </div>
+          <div className="text-xs text-red-500 p-4">Failed to load: {error}</div>
         ) : tree && tree.children ? (
           tree.children.map((node) => (
             <TreeNode
@@ -295,48 +309,54 @@ export function OntologyTree({
               level={0}
               selectedId={selectedId}
               onSelect={handleSelect}
-              expandedOverride={searching ? expand : null}
+              expandedOverride={filtering ? expand : null}
+              errorHighlights={errorHighlights}
             />
           ))
         ) : (
-          <div className="text-xs text-gray-400 p-4">
-            No matches.
-          </div>
+          <div className="text-xs text-gray-400 p-4">No matches.</div>
         )}
       </div>
 
-      {/* Legend (kept from original) */}
       <div className="p-4 border-t border-gray-200">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-gray-700">Error type highlights</p>
+          <button
+            onClick={() => onErrorFilterChange?.(null)}
+            className="text-[11px] text-gray-500 hover:text-gray-900"
+          >
+            clear
+          </button>
+        </div>
         <div className="text-xs text-gray-600 space-y-1.5">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-red-500" />
-            <span>Structural Conflict</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-yellow-500" />
-            <span>Semantic Ambiguity</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-purple-500" />
-            <span>Multiple Inheritance</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-500" />
-            <span>AI Suggestion</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span>Human Approved</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] px-1 rounded bg-purple-100 text-purple-700">
-              v
-            </span>
-            <span>Virtual node</span>
-          </div>
+          <button
+            onClick={() => onErrorFilterChange?.(activeErrorFilter === "all" ? null : "all")}
+            className={`w-full flex items-center justify-between gap-2 px-2 py-1 rounded ${
+              activeErrorFilter === "all" ? "bg-gray-900 text-white" : "hover:bg-gray-50"
+            }`}
+          >
+            <span>All highlighted</span>
+            <span>{Object.keys(errorHighlights).length}</span>
+          </button>
+
+          {(Object.keys(ERROR_META) as PatternType[]).map((type) => (
+            <button
+              key={type}
+              onClick={() => onErrorFilterChange?.(activeErrorFilter === type ? null : type)}
+              className={`w-full flex items-center justify-between gap-2 px-2 py-1 rounded ${
+                activeErrorFilter === type ? "bg-gray-900 text-white" : "hover:bg-gray-50"
+              }`}
+            >
+              <span className="inline-flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${ERROR_META[type].dot}`} />
+                {ERROR_META[type].label}
+              </span>
+              <span>{counts[type]}</span>
+            </button>
+          ))}
         </div>
       </div>
-    {/* Semantic Review popup (appears to the right of the clicked node) */}
+
       {popup && (
         <SemanticReviewPopup
           synsetId={popup.synset}

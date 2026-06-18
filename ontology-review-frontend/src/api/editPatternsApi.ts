@@ -1,5 +1,14 @@
 const API_BASE = "http://127.0.0.1:8000";
 
+export type PatternType =
+  | "duplicate"
+  | "virtual"
+  | "misplaced"
+  | "inheritance"
+  | "naming";
+
+export type UserRole = "editor" | "admin";
+
 export interface PatternNode {
   id: string;
   label: string;
@@ -10,12 +19,7 @@ export interface PatternNode {
 
 export interface PatternSuggestion {
   id: string;
-  pattern_type:
-    | "duplicate"
-    | "virtual"
-    | "misplaced"
-    | "inheritance"
-    | "naming";
+  pattern_type: PatternType;
   title: string;
   label?: string;
   suggested_action: string;
@@ -31,7 +35,7 @@ export interface PatternSuggestion {
 }
 
 export interface PatternCategory {
-  key: string;
+  key: PatternType;
   title: string;
   description: string;
   suggestions: PatternSuggestion[];
@@ -43,6 +47,7 @@ export interface Principle {
   body: string;
   source: string;
   examples?: string[];
+  category?: PatternType | "all";
   created_at?: string;
 }
 
@@ -58,7 +63,7 @@ export interface FinishedChange {
   payload?: {
     title?: string;
     suggested_action?: string;
-    pattern_type?: string;
+    pattern_type?: PatternType;
     [key: string]: unknown;
   };
   created_at: string;
@@ -70,6 +75,7 @@ export interface CollaborationConflict {
   pattern_id: string;
   status: "open" | "resolved";
   votes: FinishedChange[];
+  conflict_type?: "pattern_decision" | "llm_prompt";
   consensus?: {
     id: string;
     conflict_id: string;
@@ -85,21 +91,55 @@ export interface CollaborationConflict {
   resolved_at?: string;
 }
 
+export interface LlmPrompt {
+  id: string;
+  title: string;
+  category: PatternType | "all";
+  body: string;
+  active_version: number;
+  updated_at: string;
+}
+
+export interface LlmPromptChange {
+  id: string;
+  prompt_id: string;
+  reviewer: string;
+  proposed_body: string;
+  comment?: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  resolved_by?: string;
+  resolved_at?: string;
+}
+
+export interface ManualEdit {
+  id: string;
+  pattern_id: string;
+  reviewer: string;
+  edit_type: string;
+  target_node_id?: string;
+  payload: Record<string, unknown>;
+  comment?: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  resolved_by?: string;
+  resolved_at?: string;
+}
+
+export interface BatchJob {
+  id: string;
+  category: PatternType | "all";
+  reviewer: string;
+  status: "queued" | "approved" | "rejected";
+  suggestion_count: number;
+  created_at: string;
+  resolved_by?: string;
+  resolved_at?: string;
+}
+
 export async function getGroupedPatterns() {
   const res = await fetch(`${API_BASE}/edit-patterns/grouped`);
   if (!res.ok) throw new Error("Failed to load grouped edit patterns");
-  return res.json();
-}
-
-export async function getDuplicatePatterns() {
-  const res = await fetch(`${API_BASE}/edit-patterns/duplicates`);
-  if (!res.ok) throw new Error("Failed to load duplicate patterns");
-  return res.json();
-}
-
-export async function getVirtualPatterns() {
-  const res = await fetch(`${API_BASE}/edit-patterns/virtual`);
-  if (!res.ok) throw new Error("Failed to load virtual patterns");
   return res.json();
 }
 
@@ -111,6 +151,7 @@ export async function decideEditPattern(
     comment?: string;
     altered_action?: string;
     principle_update?: string;
+    principle_category?: PatternType | "all";
     link_principle_id?: string;
     payload?: Record<string, unknown>;
   }
@@ -124,21 +165,25 @@ export async function decideEditPattern(
     }
   );
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to store pattern decision: ${text}`);
-  }
-
+  if (!res.ok) throw new Error(`Failed to store pattern decision: ${await res.text()}`);
   return res.json();
 }
 
-export async function getPrinciples() {
-  const res = await fetch(`${API_BASE}/principles`);
+export async function getPrinciples(category?: PatternType | "all") {
+  const url = category
+    ? `${API_BASE}/principles?category=${encodeURIComponent(category)}`
+    : `${API_BASE}/principles`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to load principles");
   return res.json();
 }
 
-export async function addPrinciple(text: string, reviewer = "Sophia") {
+export async function addPrinciple(
+  text: string,
+  reviewer = "Sophia",
+  examples: string[] = [],
+  category: PatternType | "all" = "all"
+) {
   const res = await fetch(`${API_BASE}/principles`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -146,6 +191,8 @@ export async function addPrinciple(text: string, reviewer = "Sophia") {
       decision: "approve",
       reviewer,
       principle_update: text,
+      principle_category: category,
+      payload: { examples },
     }),
   });
 
@@ -176,6 +223,7 @@ export async function resolveConflict(
     consensus_decision: "approve" | "alter" | "reject";
     consensus_action?: string;
     comment?: string;
+    is_admin?: boolean;
   }
 ) {
   const res = await fetch(
@@ -187,10 +235,113 @@ export async function resolveConflict(
     }
   );
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Failed to resolve conflict: ${text}`);
-  }
+  if (!res.ok) throw new Error(`Failed to resolve conflict: ${await res.text()}`);
+  return res.json();
+}
 
+export async function getLlmPrompts() {
+  const res = await fetch(`${API_BASE}/llm-prompts`);
+  if (!res.ok) throw new Error("Failed to load LLM prompts");
+  return res.json();
+}
+
+export async function proposeLlmPromptChange(
+  promptId: string,
+  body: { reviewer: string; proposed_body: string; comment?: string }
+) {
+  const res = await fetch(`${API_BASE}/llm-prompts/${encodeURIComponent(promptId)}/changes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to propose prompt change: ${await res.text()}`);
+  return res.json();
+}
+
+export async function getLlmPromptChanges() {
+  const res = await fetch(`${API_BASE}/llm-prompt-changes`);
+  if (!res.ok) throw new Error("Failed to load prompt changes");
+  return res.json();
+}
+
+export async function approveLlmPromptChange(
+  changeId: string,
+  body: { reviewer: string; approve: boolean; is_admin?: boolean; comment?: string }
+) {
+  const res = await fetch(`${API_BASE}/admin/llm-prompt-changes/${encodeURIComponent(changeId)}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to review prompt change: ${await res.text()}`);
+  return res.json();
+}
+
+export async function createBatchJob(
+  body: { reviewer: string; category: PatternType | "all"; is_admin?: boolean }
+) {
+  const res = await fetch(`${API_BASE}/admin/batch-process`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to create batch job: ${await res.text()}`);
+  return res.json();
+}
+
+export async function getBatchJobs() {
+  const res = await fetch(`${API_BASE}/admin/batch-jobs`);
+  if (!res.ok) throw new Error("Failed to load batch jobs");
+  return res.json();
+}
+
+export async function decideBatchJob(
+  jobId: string,
+  body: { reviewer: string; approve: boolean; is_admin?: boolean; comment?: string }
+) {
+  const res = await fetch(`${API_BASE}/admin/batch-jobs/${encodeURIComponent(jobId)}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to review batch job: ${await res.text()}`);
+  return res.json();
+}
+
+export async function submitManualEdit(
+  body: {
+    reviewer: string;
+    pattern_id: string;
+    edit_type: string;
+    target_node_id?: string;
+    payload?: Record<string, unknown>;
+    comment?: string;
+  }
+) {
+  const res = await fetch(`${API_BASE}/manual-edits`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to submit manual edit: ${await res.text()}`);
+  return res.json();
+}
+
+export async function getManualEdits() {
+  const res = await fetch(`${API_BASE}/manual-edits`);
+  if (!res.ok) throw new Error("Failed to load manual edits");
+  return res.json();
+}
+
+export async function decideManualEdit(
+  editId: string,
+  body: { reviewer: string; approve: boolean; is_admin?: boolean; comment?: string }
+) {
+  const res = await fetch(`${API_BASE}/admin/manual-edits/${encodeURIComponent(editId)}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to review manual edit: ${await res.text()}`);
   return res.json();
 }
