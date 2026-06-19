@@ -10,3 +10,7 @@ __pycache__/
 
 # OS
 .DS_Store
+
+# Secrets
+.env
+ontology_backend_starter/.env
