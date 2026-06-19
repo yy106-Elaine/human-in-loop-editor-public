@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from app.store import ONTOLOGY_TREE, find_node
+from app.services.ai_scoring import score_candidate
 
 
 @dataclass
@@ -84,20 +85,36 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
             continue
 
         synsets = sorted({n.code for n in nodes if n.code})
+        # Rule-based fallback (used only if the AI call fails).
         if len(synsets) <= 1:
-            suggested_action = "merge"
-            rationale = (
-                "These nodes share the same label and appear to have the same or missing synset. "
-                "They may represent duplicate concepts unless their paths imply distinct ontology roles."
-            )
-            confidence = 0.90
+            fallback = {
+                "suggested_action": "merge",
+                "rationale": (
+                    "These nodes share the same label and appear to have the same or missing synset. "
+                    "They may represent duplicate concepts unless their paths imply distinct ontology roles."
+                ),
+                "confidence": 0.90,
+            }
         else:
-            suggested_action = "keep_separate_rename"
-            rationale = (
-                "These nodes share the same label but use different synsets. They should likely be kept separate, "
-                "but renamed or disambiguated so reviewers can see which sense is intended."
-            )
-            confidence = 0.75
+            fallback = {
+                "suggested_action": "keep_separate_rename",
+                "rationale": (
+                    "These nodes share the same label but use different synsets. They should likely be kept separate, "
+                    "but renamed or disambiguated so reviewers can see which sense is intended."
+                ),
+                "confidence": 0.75,
+            }
+
+        candidate_text = "\n".join(
+            f'- "{n.label}" (synset: {n.code or "none"}) at path: {" → ".join(n.path)}'
+            for n in nodes
+        )
+        scored = score_candidate(
+            edit_type="duplicate",
+            cache_key=f"duplicate::{label_key}",
+            candidate_text=candidate_text,
+            fallback=fallback,
+        )
 
         suggestions.append(
             {
@@ -105,9 +122,9 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
                 "pattern_type": "duplicate",
                 "label": nodes[0].label,
                 "title": f"Duplicate label: {nodes[0].label}",
-                "suggested_action": suggested_action,
-                "rationale": rationale,
-                "confidence": confidence,
+                "suggested_action": scored["suggested_action"],
+                "rationale": scored["rationale"],
+                "confidence": scored["confidence"],
                 "nodes": [
                     {
                         "id": n.id,

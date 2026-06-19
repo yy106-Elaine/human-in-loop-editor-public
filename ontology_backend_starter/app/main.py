@@ -30,6 +30,12 @@ from app.store import (
     ONTOLOGY_TREE,
 )
 from app.services.diff import simulate_diff
+from app.services.prompts import (
+    get_all_prompts,
+    get_prompt,
+    update_prompt,
+    reset_prompt,
+)
 
 
 app = FastAPI(title="Ontology Review Backend", version="0.2.0")
@@ -980,3 +986,37 @@ def add_principle(body: PatternDecisionRequest):
     }
     PRINCIPLES.append(principle)
     return {"ok": True, "principle": principle}
+
+# ---------------------------------------------------------------------------
+# Editable LLM prompts (one per edit type)
+# ---------------------------------------------------------------------------
+
+class PromptUpdate(BaseModel):
+    system: Optional[str] = None
+    user: Optional[str] = None
+
+
+@app.get("/prompts")
+def list_prompts() -> Dict[str, Any]:
+    """Return all editable prompts, keyed by edit type."""
+    return {"prompts": get_all_prompts()}
+
+
+@app.put("/prompts/{edit_type}")
+def edit_prompt(edit_type: str, body: PromptUpdate) -> Dict[str, Any]:
+    """Update the system and/or user prompt for one edit type."""
+    try:
+        updated = update_prompt(edit_type, system=body.system, user=body.user)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown edit type: {edit_type}")
+    return {"edit_type": edit_type, "prompt": updated}
+
+
+@app.post("/prompts/{edit_type}/reset")
+def reset_one_prompt(edit_type: str) -> Dict[str, Any]:
+    """Reset one edit type's prompt back to its default."""
+    try:
+        restored = reset_prompt(edit_type)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown edit type: {edit_type}")
+    return {"edit_type": edit_type, "prompt": restored}
