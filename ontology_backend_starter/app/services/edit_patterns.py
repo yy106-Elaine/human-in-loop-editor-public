@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from app.store import ONTOLOGY_TREE, find_node
 from app.services.ai_scoring import score_candidate
+from app.services.ontology_context import get_context_by_label, format_context, get_all_contexts_by_label
 
 
 @dataclass
@@ -84,6 +85,14 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
         if len(nodes) < 2:
             continue
 
+        # Semantic filter: only keep as a duplicate candidate if the same-label
+        # nodes actually share a definition. Labels like "party" repeat with
+        # different senses and are NOT duplicates.
+        ctxs = get_all_contexts_by_label(label_key)
+        defs = {c["definition"].strip() for c in ctxs if c.get("definition", "").strip()}
+        if len(defs) != 1:
+            continue
+
         synsets = sorted({n.code for n in nodes if n.code})
         # Rule-based fallback (used only if the AI call fails).
         if len(synsets) <= 1:
@@ -105,10 +114,19 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
                 "confidence": 0.75,
             }
 
-        candidate_text = "\n".join(
-            f'- "{n.label}" (synset: {n.code or "none"}) at path: {" → ".join(n.path)}'
-            for n in nodes
-        )
+        # Build rich candidate text using semantic context (definitions, siblings)
+        # so the LLM can tell genuine duplicates from same-label-different-sense.
+        blocks = []
+        for n in nodes:
+            ctx = get_context_by_label(n.label)
+            if ctx:
+                blocks.append(format_context(ctx))
+            else:
+                blocks.append(
+                    f'Label: {n.label}\nSynset: {n.code or "none"}\n'
+                    f'Path: {" → ".join(n.path)}\n(no extended context found)'
+                )
+        candidate_text = "\n\n---\n\n".join(blocks)
         scored = score_candidate(
             edit_type="duplicate",
             cache_key=f"duplicate::{label_key}",
