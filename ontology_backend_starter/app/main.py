@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from app.services.ai_suggestions import generate_ai_suggestions
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from app.services.ai_scoring import score_candidate
 from app.services.edit_patterns import (
     detect_duplicate_patterns,
     detect_virtual_node_patterns,
@@ -550,19 +551,34 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
         if len(top_categories) < 2:
             continue
 
+        _paths = "\n".join(
+            f"- {r['label']} ({r.get('code') or 'no synset'}): {r.get('path_string','')}"
+            for r in matches[:6]
+        )
+        _inh_fb = {
+            "suggested_action": "consider_multiple_inheritance",
+            "rationale": (
+                "This label appears in multiple sub-ontologies or inheritance paths. "
+                "A reviewer should decide whether these are distinct senses, duplicate entries, "
+                "or a valid multiple-inheritance concept."
+            ),
+            "confidence": 0.72,
+        }
+        _inh_scored = score_candidate(
+            edit_type="multiple_inheritance",
+            cache_key=f"inheritance::{label}",
+            candidate_text=f"Label: {matches[0]['label']}\nAppears under these paths:\n{_paths}",
+            fallback=_inh_fb,
+        )
         suggestions.append(
             {
                 "id": f"inheritance::{label}",
                 "pattern_type": "inheritance",
                 "label": matches[0]["label"],
                 "title": f"Multiple inheritance candidate: {matches[0]['label']}",
-                "suggested_action": "consider_multiple_inheritance",
-                "rationale": (
-                    "This label appears in multiple sub-ontologies or inheritance paths. "
-                    "A reviewer should decide whether these are distinct senses, duplicate entries, "
-                    "or a valid multiple-inheritance concept."
-                ),
-                "confidence": 0.72,
+                "suggested_action": _inh_scored["suggested_action"],
+                "rationale": _inh_scored["rationale"],
+                "confidence": _inh_scored["confidence"],
                 "nodes": [
                     {
                         "id": row["id"],
@@ -633,6 +649,26 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
             suggested_parent = "Actor or multiple inheritance"
 
         if suggested_parent:
+            _mis_fb = {
+                "suggested_action": f"review placement under {suggested_parent}",
+                "rationale": (
+                    f"The node appears under {top or 'an unclear category'}, but its label suggests "
+                    f"it may belong under {suggested_parent}. A human reviewer should verify whether "
+                    "this is a true IS-A relationship or a contextual use."
+                ),
+                "confidence": 0.64,
+            }
+            _mis_scored = score_candidate(
+                edit_type="misplaced",
+                cache_key=f"misplaced::{row['id']}",
+                candidate_text=(
+                    f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
+                    f"Current path: {path_string}\n"
+                    f"Current top category: {top}\n"
+                    f"Heuristic suggests it may belong under: {suggested_parent}"
+                ),
+                fallback=_mis_fb,
+            )
             suggestions.append(
                 {
                     "id": f"misplaced::{row['id']}",
@@ -642,13 +678,9 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
                     "code": row.get("code"),
                     "path": path_string,
                     "title": f"Possible misplaced node: {row['label']}",
-                    "suggested_action": f"review placement under {suggested_parent}",
-                    "rationale": (
-                        f"The node appears under {top or 'an unclear category'}, but its label suggests "
-                        f"it may belong under {suggested_parent}. A human reviewer should verify whether "
-                        "this is a true IS-A relationship or a contextual use."
-                    ),
-                    "confidence": 0.64,
+                    "suggested_action": _mis_scored["suggested_action"],
+                    "rationale": _mis_scored["rationale"],
+                    "confidence": _mis_scored["confidence"],
                     "nodes": [
                         {
                             "id": row["id"],
@@ -707,6 +739,23 @@ def _detect_naming_patterns() -> Dict[str, Any]:
         if virtual_marker:
             confidence += 0.05
 
+        _nam_fb = {
+            "suggested_action": "clarify_label_or_add_disambiguation",
+            "rationale": (
+                "This node may need a clearer label or disambiguation because it is vague, virtual, "
+                "missing a synset, or formatted in a way that may hide the intended sense."
+            ),
+            "confidence": min(confidence, 0.88),
+        }
+        _nam_scored = score_candidate(
+            edit_type="naming",
+            cache_key=f"naming::{row['id']}",
+            candidate_text=(
+                f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
+                f"Path: {row.get('path_string','')}"
+            ),
+            fallback=_nam_fb,
+        )
         suggestions.append(
             {
                 "id": f"naming::{row['id']}",
@@ -716,12 +765,9 @@ def _detect_naming_patterns() -> Dict[str, Any]:
                 "code": row.get("code"),
                 "path": row.get("path_string", ""),
                 "title": f"Naming review: {row['label']}",
-                "suggested_action": "clarify_label_or_add_disambiguation",
-                "rationale": (
-                    "This node may need a clearer label or disambiguation because it is vague, virtual, "
-                    "missing a synset, or formatted in a way that may hide the intended sense."
-                ),
-                "confidence": min(confidence, 0.88),
+                "suggested_action": _nam_scored["suggested_action"],
+                "rationale": _nam_scored["rationale"],
+                "confidence": _nam_scored["confidence"],
                 "nodes": [
                     {
                         "id": row["id"],
