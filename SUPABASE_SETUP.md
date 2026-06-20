@@ -14,7 +14,8 @@ This guide makes the ontology review app collaborative — node status changes m
 | `ontology_backend_starter/requirements.txt` | Add `supabase` and `python-dotenv` |
 | `ontology_backend_starter/.env` | New file — your backend Supabase credentials |
 | `ontology_backend_starter/app/store.py` | Persist status changes; load them on startup |
-| `ontology_backend_starter/app/main.py` | Persist action log; add `/status/all` endpoint |
+| `ontology_backend_starter/app/main.py` | Persist action log; add `/status/all` endpoint; accept `refresh` param |
+| `ontology_backend_starter/app/services/ai_suggestions.py` | Cache suggestions in Supabase; skip Claude on cache hit |
 | `ontology-review-frontend/.env.local` | New file — your frontend Supabase credentials |
 | `ontology-review-frontend/src/lib/supabaseClient.ts` | New file — frontend Supabase client |
 | `ontology-review-frontend/src/components/LoginPage.tsx` | New file — login screen |
@@ -61,6 +62,13 @@ CREATE TABLE action_log (
   reviewer    TEXT,
   notes       TEXT,
   payload     JSONB DEFAULT '{}',
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Caches AI suggestions so Claude is not called on every node selection
+CREATE TABLE ai_suggestions (
+  node_id     TEXT PRIMARY KEY,
+  suggestions JSONB NOT NULL DEFAULT '[]',
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 ```
@@ -386,6 +394,198 @@ Inside the `OntologyTree` function, find the existing `useEffect` that fetches t
 4. Restart the backend. Reload the app. Previously approved nodes should still show their status (loaded from Supabase).
 
 5. In your Supabase dashboard, open **Table Editor** → `node_status` or `action_log` to confirm rows are being written.
+
+---
+
+## Step 11 — Cache AI suggestions
+
+Currently, Claude is called every time a reviewer selects a node (as long as an API key is connected). The results are held only in React state and lost on every node switch or reload. This step persists suggestions to the `ai_suggestions` table and skips the Claude call when a cached result already exists. A **Refresh** button lets reviewers force a new call when needed.
+
+### 11a — Update `ai_suggestions.py`
+
+Open `ontology_backend_starter/app/services/ai_suggestions.py`.
+
+At the top of the file, add an import for the Supabase client:
+
+```python
+from app.store import _get_supabase
+```
+
+Then find the `generate_ai_suggestions` function signature:
+
+```python
+def generate_ai_suggestions(node_id: str, api_key: str) -> dict:
+```
+
+Replace the entire function with this new version:
+
+```python
+def generate_ai_suggestions(node_id: str, api_key: str, refresh: bool = False) -> dict:
+    """Call Claude to generate review suggestions for one node.
+    Results are cached in Supabase. Pass refresh=True to force a new call.
+    Returns {"suggestions": [...], "cached": bool} or raises on hard errors.
+    """
+    sb = _get_supabase()
+
+    # Return cached result if available and refresh not requested
+    if sb and not refresh:
+        try:
+            row = sb.table("ai_suggestions") \
+                    .select("suggestions") \
+                    .eq("node_id", node_id) \
+                    .maybe_single() \
+                    .execute()
+            if row.data:
+                return {"suggestions": row.data["suggestions"], "cached": True}
+        except Exception as e:
+            print(f"[ai_suggestions] Cache read failed for {node_id}: {e}")
+
+    # Cache miss (or refresh=True) — call Claude
+    node = find_node(node_id)
+    if node is None:
+        return {"suggestions": [], "cached": False}
+
+    parent_label, siblings = _find_parent_and_siblings(node_id)
+    siblings_str = ", ".join(siblings[:15]) if siblings else "(none)"
+
+    user_prompt = USER_PROMPT.format(
+        label=node.label,
+        code=node.code or "(no synset)",
+        parent=parent_label,
+        siblings=siblings_str,
+    )
+
+    client = Anthropic(api_key=api_key)
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_prompt}],
+    )
+
+    raw = response.content[0].text
+    cleaned = _strip_json_fences(raw)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        return {"suggestions": [], "cached": False}
+
+    suggestions = parsed.get("suggestions", [])[:3]
+
+    # Write to cache
+    if sb:
+        try:
+            sb.table("ai_suggestions").upsert({
+                "node_id": node_id,
+                "suggestions": suggestions,
+                "created_at": "now()",
+            }).execute()
+        except Exception as e:
+            print(f"[ai_suggestions] Cache write failed for {node_id}: {e}")
+
+    return {"suggestions": suggestions, "cached": False}
+```
+
+### 11b — Accept `refresh` in `main.py`
+
+Find the `ai_suggestions` route in `main.py`:
+
+```python
+@app.post("/reviews/{node_id}/ai-suggestions")
+def ai_suggestions(node_id: str, body: AISuggestionRequest):
+    if not body.api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+    try:
+        return generate_ai_suggestions(node_id, body.api_key)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI suggestion failed: {e}")
+```
+
+Replace it with:
+
+```python
+@app.post("/reviews/{node_id}/ai-suggestions")
+def ai_suggestions(node_id: str, body: AISuggestionRequest, refresh: bool = False):
+    if not body.api_key:
+        raise HTTPException(status_code=400, detail="api_key is required")
+    try:
+        return generate_ai_suggestions(node_id, body.api_key, refresh=refresh)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI suggestion failed: {e}")
+```
+
+The `refresh` parameter is a query param — the frontend passes it as `?refresh=true`.
+
+### 11c — Update `ontologyApi.ts`
+
+Find the existing `getAISuggestions` function:
+
+```ts
+export async function getAISuggestions(nodeId: string, apiKey: string) {
+  const res = await fetch(
+    `${API_BASE}/reviews/${nodeId}/ai-suggestions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey }),
+    }
+  );
+  if (!res.ok) {
+    throw new Error("Failed to load AI suggestions");
+  }
+  return res.json();
+}
+```
+
+Replace it with:
+
+```ts
+export async function getAISuggestions(
+  nodeId: string,
+  apiKey: string,
+  refresh = false
+) {
+  const url = `${API_BASE}/reviews/${nodeId}/ai-suggestions${refresh ? "?refresh=true" : ""}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api_key: apiKey }),
+  });
+  if (!res.ok) throw new Error("Failed to load AI suggestions");
+  return res.json();
+}
+```
+
+### 11d — Add a Refresh button in `ReviewerActions.tsx`
+
+The suggestions panel in `ReviewerActions.tsx` currently has no way to request fresh suggestions. Find the section that renders the AI suggestions header (look for the `Sparkles` icon) and add a small refresh button next to it:
+
+```tsx
+<div className="flex items-center justify-between mb-2">
+  <div className="flex items-center gap-1 text-xs font-semibold text-gray-700">
+    <Sparkles size={10} />
+    AI Suggestions
+  </div>
+  {apiConnected && (
+    <button
+      onClick={() => {
+        setLoadingAI(true);
+        setAiSuggestions(null);
+        getAISuggestions(nodeId, apiKey, true)   // refresh=true
+          .then((data) => setAiSuggestions(data.suggestions ?? []))
+          .catch(() => setAiSuggestions([]))
+          .finally(() => setLoadingAI(false));
+      }}
+      className="text-[10px] text-gray-400 hover:text-gray-700"
+      title="Regenerate suggestions"
+    >
+      ↺ refresh
+    </button>
+  )}
+</div>
+```
+
+> Find the existing `<Sparkles size={10} />` line and replace the surrounding header element with the above. The exact markup will depend on the current state of the file — match the surrounding class names as needed.
 
 ---
 
