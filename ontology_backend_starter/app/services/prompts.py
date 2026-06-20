@@ -20,15 +20,15 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "across the taxonomy with genuinely different senses (e.g. 'party' as a "
             "political organization vs. a social gathering).\n\n"
             "Use the DEFINITION, SYNONYMS, and PATH of each node to decide:\n"
-            "- MERGE: the nodes refer to the same concept (same or near-identical "
+            "- merge: the nodes refer to the same concept (same or near-identical "
             "definition/synset) and should be combined.\n"
-            "- KEEP_SEPARATE_RENAME: the nodes are different senses that happen to "
-            "share a label; keep them separate but suggest disambiguating labels.\n\n"
+            "- rename: the nodes are different senses that happen to "
+            "share a label; keep them separate but rename to disambiguate.\n\n"
             "Be conservative: only recommend MERGE when the senses are clearly the same.\n\n"
             "IMPORTANT RULES:\n"
-            "- suggested_action MUST be EXACTLY one of these two strings: "
-            "\"merge\" or \"keep_separate_rename\". Never invent other "
-            "values like \"relabel\" or \"rename\".\n"
+            "- suggested_action MUST be EXACTLY one of these strings: "
+            "\"merge\" or \"rename\". Never invent other "
+            "values like \"relabel\", \"keep\", or \"keep_separate_rename\".\n"
             "- confidence must reflect genuine uncertainty. Reserve 0.95-1.0 "
             "ONLY when definitions are word-for-word identical. Use 0.7-0.9 "
             "when concepts are clearly the same but wording differs, and "
@@ -36,7 +36,7 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "1.0.\n\n"
             "Return STRICT JSON only, no markdown:\n"
             "{\n"
-            '  "suggested_action": "merge" | "keep_separate_rename",\n'
+            '  "suggested_action": "merge" | "rename",\n'
             '  "rationale": "1-2 sentence explanation grounded in the definitions",\n'
             '  "confidence": 0.0 to 1.0\n'
             "}"
@@ -52,15 +52,14 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "You are auditing a noun taxonomy for an ontology engineering project. "
             "A '[virtual]' node is an abstract grouping node inserted to organize "
             "children, not a real WordNet concept. Decide whether it earns its place:\n"
-            "- KEEP: it groups multiple children or captures a reusable abstraction "
-            "that improves MECE structure.\n"
-            "- ALTER: it is useful but mislabeled or has only one child; suggest "
-            "renaming or merging with its child.\n"
-            "- REMOVE: it adds little organizational value and could be flattened.\n\n"
+            "- accept: it groups multiple children or captures a reusable abstraction "
+            "that improves MECE structure; keep it as-is.\n"
+            "- rename: it is useful but mislabeled or unclear; give it a clearer label.\n"
+            "- delete: it adds little organizational value and could be flattened.\n\n"
             "Be conservative.\n\n"
             "Return STRICT JSON only, no markdown:\n"
             "{\n"
-            '  "suggested_action": "keep" | "alter" | "remove",\n'
+            '  "suggested_action": "accept" | "rename" | "delete",\n'
             '  "rationale": "1-2 sentence explanation",\n'
             '  "confidence": 0.0 to 1.0\n'
             "}"
@@ -88,10 +87,10 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Use the DEFINITION, SUPERSENSES, PATH, and SIBLINGS to reason about "
             "conceptual meaning, not just surface words. Be conservative: placements "
             "are expected to be imperfect, so only flag clear errors. If the node could "
-            "reasonably be read as a subtype of the parent, return keep.\n\n"
+            "reasonably be read as a subtype of the parent, return accept.\n\n"
             "Return STRICT JSON only, no markdown:\n"
             "{\n"
-            '  "suggested_action": "keep" | "move",\n'
+            '  "suggested_action": "accept" | "place_elsewhere",\n'
             '  "error_type": "TYPE_MISMATCH" | "HIERARCHY_MISMATCH" | "GRANULARITY_ERROR" | "N/A",\n'
             '  "rationale": "1-2 sentence explanation",\n'
             '  "confidence": 0.0 to 1.0\n'
@@ -113,7 +112,7 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Be conservative: most nodes need only one parent.\n\n"
             "Return STRICT JSON only, no markdown:\n"
             "{\n"
-            '  "suggested_action": "single_parent" | "multiple_parents",\n'
+            '  "suggested_action": "accept" | "add_parent",\n'
             '  "rationale": "1-2 sentence explanation",\n'
             '  "confidence": 0.0 to 1.0\n'
             "}"
@@ -135,9 +134,9 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "ambiguous given its definition and siblings.\n\n"
             "Return STRICT JSON only, no markdown:\n"
             "{\n"
-            '  "suggested_action": "keep_label" | "rename",\n'
+            '  "suggested_action": "accept" | "rename",\n'
             '  "rationale": "1-2 sentence explanation",\n'
-            '  "title_suggestion": "suggested clearer label, or empty if keep_label",\n'
+            '  "title_suggestion": "suggested clearer label, or empty if accept",\n'
             '  "confidence": 0.0 to 1.0\n'
             "}"
         ),
