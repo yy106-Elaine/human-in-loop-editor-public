@@ -195,6 +195,30 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
             "contribute useful inheritance organization."
         )
 
+    fallback = {
+        "suggested_action": action,
+        "rationale": rationale,
+        "confidence": confidence,
+    }
+
+    ctx = get_context_by_label(node.label)
+    if ctx:
+        candidate_text = format_context(ctx)
+    else:
+        candidate_text = (
+            f"Label: {node.label}\n"
+            f"Synset: {node.code or 'none (virtual/abstract node)'}\n"
+            f"Path: {' → '.join(node.path)}\n"
+            f"Number of children: {node.children_count}"
+        )
+
+    scored = score_candidate(
+        edit_type="virtual",
+        cache_key=f"virtual::{node.id}",
+        candidate_text=candidate_text,
+        fallback=fallback,
+    )
+
     return {
         "id": f"virtual::{node.id}",
         "pattern_type": "virtual",
@@ -204,10 +228,10 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
         "parent_label": node.parent_label,
         "path": " → ".join(node.path),
         "children_count": node.children_count,
-        "suggested_action": action,
+        "suggested_action": scored["suggested_action"],
         "title": f"Virtual node: {node.label}",
-        "rationale": rationale,
-        "confidence": confidence,
+        "rationale": scored["rationale"],
+        "confidence": scored["confidence"],
     }
 
 
