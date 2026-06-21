@@ -1,5 +1,10 @@
 import json
 import re
+import os
+from dotenv import load_dotenv
+from supabase import create_client, Client as SupabaseClient
+
+load_dotenv()
 from nltk.corpus import wordnet as wn
 from copy import deepcopy
 from pathlib import Path
@@ -12,6 +17,18 @@ from app.schemas import (
     ReviewedCase,
     CaseMetadata,
 )
+
+_supabase: SupabaseClient | None = None
+
+def _get_supabase() -> SupabaseClient | None:
+    global _supabase
+    if _supabase is not None:
+        return _supabase
+    url = os.getenv("SUPABASE_URL")
+    key = os.getenv("SUPABASE_SERVICE_KEY")
+    if url and key:
+        _supabase = create_client(url, key)
+    return _supabase
 
 DATA_DIR = Path(__file__).parent / "data"
 
@@ -108,6 +125,25 @@ def _build_full_tree() -> List[OntologyNode]:
 
 
 ONTOLOGY_TREE: List[OntologyNode] = _build_full_tree()
+def _load_saved_statuses() -> None:
+    """启动时从 Supabase 恢复之前保存的 node 状态。"""
+    sb = _get_supabase()
+    if sb is None:
+        return
+    try:
+        rows = sb.table("node_status").select("node_id,status").execute()
+        for row in rows.data:
+            node = find_node(row["node_id"])
+            if node:
+                try:
+                    node.status = NodeStatus(row["status"])
+                except ValueError:
+                    pass
+    except Exception as e:
+        print(f"[store] Could not load saved statuses: {e}")
+
+
+_load_saved_statuses()
 
 SEMANTIC_REVIEWS: Dict[str, SemanticReview] = {
     "school": SemanticReview(
@@ -181,10 +217,21 @@ def find_node(node_id: str, nodes: List[OntologyNode] | None = None) -> Ontology
     return None
 
 
-def update_node_status(node_id: str, status: NodeStatus) -> None:
+def update_node_status(node_id: str, status: NodeStatus, reviewer: str | None = None) -> None:
     node = find_node(node_id)
     if node:
         node.status = status
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("node_status").upsert({
+                "node_id": node_id,
+                "status": status.value,
+                "updated_by": reviewer,
+                "updated_at": "now()",
+            }).execute()
+        except Exception as e:
+            print(f"[store] Could not persist status for {node_id}: {e}")
 
 def _wordnet_definition(code: str | None) -> str:
     """Look up a WordNet gloss from a synset code like 'school.n.01'.
