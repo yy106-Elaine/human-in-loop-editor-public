@@ -29,6 +29,7 @@ from app.store import (
     update_node_status,
     find_node,
     ONTOLOGY_TREE,
+    _get_supabase,
 )
 from app.services.diff import simulate_diff
 from app.services.prompts import (
@@ -104,6 +105,18 @@ def log_event(
         "payload": payload or {},
     }
     ACTION_LOG.append(event)
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("action_log").insert({
+                "node_id": node_id,
+                "action_type": action_type,
+                "reviewer": reviewer,
+                "notes": notes,
+                "payload": payload or {},
+            }).execute()
+        except Exception as e:
+            print(f"[main] Could not write action log: {e}")
     return event
 
 
@@ -200,8 +213,28 @@ def recompute_conflict(pattern_id: str) -> Optional[Dict[str, Any]]:
 @app.get("/health")
 def health():
     return {"ok": True}
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
+@app.get("/status/all")
+def all_statuses():
+    """返回所有被改过的 node 的 node_id → status 映射。"""
+    sb = _get_supabase()
+    if sb is None:
+        return {}
+    try:
+        rows = sb.table("node_status").select("node_id,status").execute()
+        return {r["node_id"]: r["status"] for r in rows.data}
+    except Exception as e:
+        print(f"[main] Could not fetch statuses: {e}")
+        return {}
+
+
+@app.get("/ontology/tree")
+def ontology_tree():
+    return get_tree()
 @app.get("/ontology/tree")
 def ontology_tree():
     return get_tree()

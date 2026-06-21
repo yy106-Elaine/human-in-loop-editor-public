@@ -142,9 +142,6 @@ def _load_saved_statuses() -> None:
     except Exception as e:
         print(f"[store] Could not load saved statuses: {e}")
 
-
-_load_saved_statuses()
-
 SEMANTIC_REVIEWS: Dict[str, SemanticReview] = {
     "school": SemanticReview(
         node_id="school",
@@ -304,3 +301,5 @@ def get_case_metadata(node_id: str) -> CaseMetadata:
             reviewer="Unassigned",
         )
     return CASE_METADATA[node_id]
+
+_load_saved_statuses()

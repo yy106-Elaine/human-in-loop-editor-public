@@ -3,13 +3,13 @@ AI scoring layer: given rule-detected candidates, ask the LLM for a
 suggested action, rationale, and confidence. Caches results so the same
 candidate isn't re-sent to OpenAI on every detect call.
 """
-
 import json
 import re
 from typing import Any, Dict, List, Optional
 
 from app.services.llm_client import call_llm
 from app.services.prompts import get_prompt
+from app.store import _get_supabase
 
 # Cache: key -> {"suggested_action", "rationale", "confidence"}
 _CACHE: Dict[str, Dict[str, Any]] = {}
@@ -49,20 +49,48 @@ def score_candidate(
     """Ask the LLM to score one candidate. Returns dict with
     suggested_action / rationale / confidence. Falls back to `fallback`
     (the old rule-based values) on any error, so detection never crashes."""
+    # 1. In-memory cache is fastest
     if cache_key in _CACHE:
         return _CACHE[cache_key]
 
+    # 2. Check Supabase persistent cache
+    sb = _get_supabase()
+    if sb:
+        try:
+            row = sb.table("ai_scores").select("result").eq("cache_key", cache_key).maybe_single().execute()
+            if row is not None and row.data:
+                _CACHE[cache_key] = row.data["result"]   # warm in-memory cache
+                return row.data["result"]
+        except Exception as e:
+            print(f"[ai_scoring] cache read failed for {cache_key}: {e}")
+
+    # 3. Cache miss -> call OpenAI
+    used_fallback = False
     try:
         prompt = get_prompt(edit_type)
         user = prompt["user"].format(candidate=candidate_text)
         raw = call_llm(prompt["system"], user)
         parsed = _parse_llm_json(raw)
-        result = parsed if parsed is not None else dict(fallback)
+        if parsed is not None:
+            result = parsed
+        else:
+            result = dict(fallback)
+            used_fallback = True
     except Exception:
-        # Network error, bad key, timeout, etc. — fail soft.
         result = dict(fallback)
+        used_fallback = True
 
+    # 4. Write to in-memory cache; only persist real OpenAI results to Supabase
     _CACHE[cache_key] = result
+    if sb and not used_fallback:
+        try:
+            sb.table("ai_scores").upsert({
+                "cache_key": cache_key,
+                "result": result,
+            }).execute()
+        except Exception as e:
+            print(f"[ai_scoring] cache write failed for {cache_key}: {e}")
+
     return result
 
 
