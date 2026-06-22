@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { SemanticReviewPopup } from "./SemanticReviewPopup";
 import { ChevronRight, ChevronDown, Search } from "lucide-react";
 import { type OntologyNode, type NodeStatus } from "./ontologyData";
+import { getNodeStatuses } from "../api/ontologyApi";
 import { type PatternType } from "../api/editPatternsApi";
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -22,6 +23,25 @@ function toOntologyNode(n: BackendNode): OntologyNode {
     synset: n.code ?? undefined,
     children: n.children && n.children.length ? n.children.map(toOntologyNode) : undefined,
   };
+}
+
+function applyStatuses(
+  nodes: Record<string, OntologyNode>,
+  statuses: Record<string, string>
+): Record<string, OntologyNode> {
+  function patchNode(node: OntologyNode): OntologyNode {
+    const newStatus = statuses[node.id];
+    return {
+      ...node,
+      status: (newStatus as NodeStatus) ?? node.status,
+      children: node.children?.map(patchNode),
+    };
+  }
+  const patched: Record<string, OntologyNode> = {};
+  for (const [key, root] of Object.entries(nodes)) {
+    patched[key] = patchNode(root);
+  }
+  return patched;
 }
 
 const ERROR_META: Record<PatternType, { label: string; dot: string; row: string }> = {
@@ -239,6 +259,20 @@ export function OntologyTree({
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Poll for status updates from other reviewers every 5 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      getNodeStatuses()
+        .then((statuses) => {
+          if (Object.keys(statuses).length > 0) {
+            setOntology((prev) => applyStatuses(prev, statuses));
+          }
+        })
+        .catch(() => {}); // fail silently — best-effort
+    }, 5000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleSelect = (node: OntologyNode, e: React.MouseEvent) => {

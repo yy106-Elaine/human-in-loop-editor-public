@@ -4,6 +4,7 @@ suggested action, rationale, and confidence. Caches results so the same
 candidate isn't re-sent to OpenAI on every detect call.
 """
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +50,21 @@ def score_candidate(
     """Ask the LLM to score one candidate. Returns dict with
     suggested_action / rationale / confidence. Falls back to `fallback`
     (the old rule-based values) on any error, so detection never crashes."""
+    # Kill switch: when SKIP_LLM is on, never call OpenAI.
+    # Serve cached results if present, otherwise return the rule-based fallback.
+    if os.getenv("SKIP_LLM", "").lower() in ("1", "true", "yes"):
+        if cache_key in _CACHE:
+            return _CACHE[cache_key]
+        sb = _get_supabase()
+        if sb:
+            try:
+                row = sb.table("ai_scores").select("result").eq("cache_key", cache_key).maybe_single().execute()
+                if row is not None and row.data:
+                    _CACHE[cache_key] = row.data["result"]
+                    return row.data["result"]
+            except Exception as e:
+                print(f"[ai_scoring] cache read failed for {cache_key}: {e}")
+        return dict(fallback)
     # 1. In-memory cache is fastest
     if cache_key in _CACHE:
         return _CACHE[cache_key]

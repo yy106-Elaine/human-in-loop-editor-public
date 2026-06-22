@@ -135,3 +135,9 @@ export async function getActionLog(nodeId?: string, query = "", limit = 100) {
   if (!res.ok) throw new Error("Failed to load action log");
   return res.json();
 }
+
+export async function getNodeStatuses(): Promise<Record<string, string>> {
+  const res = await fetch(`${API_BASE}/status/all`);
+  if (!res.ok) return {};
+  return res.json();
+}
