@@ -5,28 +5,12 @@ import { EditPatternsPage } from "./components/EditPatternsPage";
 import { LoginPage } from "./components/LoginPage";
 import { supabase } from "./lib/supabaseClient";
 import {
-  getGroupedPatterns,
-  type PatternCategory,
+  getPatternHighlights,
   type PatternType,
   type UserRole,
 } from "./api/editPatternsApi";
 
 export type ErrorHighlightMap = Record<string, PatternType>;
-
-function buildErrorHighlights(categories: PatternCategory[]): ErrorHighlightMap {
-  const highlights: ErrorHighlightMap = {};
-
-  for (const category of categories) {
-    for (const suggestion of category.suggestions ?? []) {
-      if (suggestion.node_id) highlights[suggestion.node_id] = suggestion.pattern_type;
-      for (const node of suggestion.nodes ?? []) {
-        highlights[node.id] = suggestion.pattern_type;
-      }
-    }
-  }
-
-  return highlights;
-}
 
 function getAdminEmails(): string[] {
   return String(import.meta.env.VITE_ADMIN_EMAILS || "")
@@ -39,7 +23,7 @@ export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [categories, setCategories] = useState<PatternCategory[]>([]);
+  const [errorHighlights, setErrorHighlights] = useState<ErrorHighlightMap>({});
   const [activeTreeFilter, setActiveTreeFilter] = useState<PatternType | "all" | null>(null);
 
   useEffect(() => {
@@ -57,16 +41,21 @@ export default function App() {
     return () => data.subscription.unsubscribe();
   }, []);
 
+  async function refreshTreeHighlights() {
+    try {
+      const data = await getPatternHighlights();
+      setErrorHighlights(data.highlights ?? {});
+    } catch (err) {
+      console.error("Could not load lightweight tree highlights", err);
+      setErrorHighlights({});
+    }
+  }
+
   useEffect(() => {
-    getGroupedPatterns()
-      .then((data) => setCategories(data.categories ?? []))
-      .catch((err) => {
-        console.error("Could not load tree highlights", err);
-        setCategories([]);
-      });
+    refreshTreeHighlights();
   }, []);
 
-  const errorHighlights = useMemo(() => buildErrorHighlights(categories), [categories]);
+  const visibleHighlights = useMemo(() => errorHighlights, [errorHighlights]);
 
   if (authLoading) {
     return (
@@ -130,7 +119,7 @@ export default function App() {
           <aside className="min-h-0 overflow-hidden bg-white border-r border-gray-200">
             <OntologyTree
               onNodeSelect={setSelectedNodeId}
-              errorHighlights={errorHighlights}
+              errorHighlights={visibleHighlights}
               activeErrorFilter={activeTreeFilter}
               onErrorFilterChange={setActiveTreeFilter}
             />
@@ -142,8 +131,7 @@ export default function App() {
                 selectedNodeId={selectedNodeId}
                 currentUser={currentEmail}
                 isAdmin={isAdmin}
-                externalCategories={categories}
-                onCategoriesReloaded={setCategories}
+                onCategoriesReloaded={refreshTreeHighlights}
               />
             </div>
           </main>
