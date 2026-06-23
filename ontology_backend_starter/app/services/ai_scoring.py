@@ -6,14 +6,35 @@ candidate isn't re-sent to OpenAI on every detect call.
 import json
 import os
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from app.services.llm_client import call_llm
 from app.services.prompts import get_prompt
 from app.store import _get_supabase
 
-# Cache: key -> {"suggested_action", "rationale", "confidence"}
 _CACHE: Dict[str, Dict[str, Any]] = {}
+_CACHE_PRIMED = False
+
+
+def prime_cache(force: bool = False) -> None:
+    """Load the entire ai_scores table into memory in ONE query, so each
+    candidate node doesn't hit Supabase individually (the root cause of the
+    N+1 / Server disconnected problem). Runs only once."""
+    global _CACHE_PRIMED
+    if _CACHE_PRIMED and not force:
+        return
+    sb = _get_supabase()
+    if sb is None:
+        _CACHE_PRIMED = True
+        return
+    try:
+        rows = sb.table("ai_scores").select("cache_key,result").execute()
+        for row in rows.data:
+            _CACHE[row["cache_key"]] = row["result"]
+        print(f"[ai_scoring] primed cache with {len(rows.data)} rows")
+    except Exception as e:
+        print(f"[ai_scoring] prime_cache failed: {e}")
+    _CACHE_PRIMED = True
 
 
 def _strip_json_fences(txt: str) -> str:
@@ -31,7 +52,6 @@ def _parse_llm_json(raw: str) -> Optional[Dict[str, Any]]:
         return None
     if "suggested_action" not in data:
         return None
-    # Clamp confidence into [0, 1]
     try:
         conf = float(data.get("confidence", 0.5))
     except (TypeError, ValueError):
@@ -47,40 +67,22 @@ def score_candidate(
     candidate_text: str,
     fallback: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Ask the LLM to score one candidate. Returns dict with
-    suggested_action / rationale / confidence. Falls back to `fallback`
-    (the old rule-based values) on any error, so detection never crashes."""
-    # Kill switch: when SKIP_LLM is on, never call OpenAI.
-    # Serve cached results if present, otherwise return the rule-based fallback.
-    if os.getenv("SKIP_LLM", "").lower() in ("1", "true", "yes"):
-        if cache_key in _CACHE:
-            return _CACHE[cache_key]
-        sb = _get_supabase()
-        if sb:
-            try:
-                row = sb.table("ai_scores").select("result").eq("cache_key", cache_key).maybe_single().execute()
-                if row is not None and row.data:
-                    _CACHE[cache_key] = row.data["result"]
-                    return row.data["result"]
-            except Exception as e:
-                print(f"[ai_scoring] cache read failed for {cache_key}: {e}")
-        return dict(fallback)
-    # 1. In-memory cache is fastest
+    """Score one candidate. Reads ONLY from the in-memory cache (primed once
+    via prime_cache). Never queries Supabase per-key, so it can't trigger
+    the N+1 connection storm."""
+    prime_cache()
+
+    # 1. In-memory cache hit -> return directly, never touch Supabase
     if cache_key in _CACHE:
         return _CACHE[cache_key]
 
-    # 2. Check Supabase persistent cache
-    sb = _get_supabase()
-    if sb:
-        try:
-            row = sb.table("ai_scores").select("result").eq("cache_key", cache_key).maybe_single().execute()
-            if row is not None and row.data:
-                _CACHE[cache_key] = row.data["result"]   # warm in-memory cache
-                return row.data["result"]
-        except Exception as e:
-            print(f"[ai_scoring] cache read failed for {cache_key}: {e}")
+    # 2. Kill switch: when SKIP_LLM is on, a cache miss returns the
+    #    rule-based fallback instead of calling OpenAI
+    if os.getenv("SKIP_LLM", "").lower() in ("1", "true", "yes"):
+        return dict(fallback)
 
     # 3. Cache miss -> call OpenAI
+    sb = _get_supabase()
     used_fallback = False
     try:
         prompt = get_prompt(edit_type)
@@ -96,7 +98,8 @@ def score_candidate(
         result = dict(fallback)
         used_fallback = True
 
-    # 4. Write to in-memory cache; only persist real OpenAI results to Supabase
+    # 4. Write to in-memory cache; only persist real OpenAI results to
+    #    Supabase (single upsert, low frequency)
     _CACHE[cache_key] = result
     if sb and not used_fallback:
         try:
@@ -111,4 +114,6 @@ def score_candidate(
 
 
 def clear_cache() -> None:
+    global _CACHE_PRIMED
     _CACHE.clear()
+    _CACHE_PRIMED = False
