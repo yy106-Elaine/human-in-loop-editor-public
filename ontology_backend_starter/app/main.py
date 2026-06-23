@@ -827,52 +827,192 @@ def edit_patterns():
     return detect_all_edit_patterns()
 
 
-@app.get("/edit-patterns/grouped")
-def grouped_edit_patterns():
-    """Return all edit-pattern suggestions grouped by issue type for the Examples page."""
-    duplicates = detect_duplicate_patterns()
-    virtuals = detect_virtual_node_patterns()
-    misplaced = _detect_misplaced_patterns()
-    inheritance = _detect_inheritance_patterns()
-    naming = _detect_naming_patterns()
 
-    categories = [
-        {
-            "key": "duplicate",
-            "title": "Duplicate Handling",
-            "description": "Same label, repeated concept, or different synsets that need merge/rename review.",
-            "suggestions": duplicates.get("suggestions", [])[:25],
-        },
-        {
-            "key": "virtual",
-            "title": "Virtual Node Handling",
-            "description": "Virtual nodes that should be kept, altered, or removed based on inheritance value.",
-            "suggestions": virtuals.get("suggestions", [])[:25],
-        },
-        {
-            "key": "misplaced",
-            "title": "Misplaced Nodes",
-            "description": "Nodes whose current parent may not express a valid IS-A relationship.",
-            "suggestions": misplaced.get("suggestions", [])[:25],
-        },
-        {
-            "key": "inheritance",
-            "title": "Multiple Inheritance",
-            "description": "Concepts that may legitimately belong under more than one parent.",
-            "suggestions": inheritance.get("suggestions", [])[:25],
-        },
-        {
-            "key": "naming",
-            "title": "Naming / Disambiguation",
-            "description": "Labels that may need clearer names, sense labels, or formatting changes.",
-            "suggestions": naming.get("suggestions", [])[:25],
-        },
-    ]
+PATTERN_CATEGORY_META: Dict[str, Dict[str, str]] = {
+    "duplicate": {
+        "title": "Duplicate Handling",
+        "description": "Same label, repeated concept, or different synsets that need merge/rename review.",
+    },
+    "virtual": {
+        "title": "Virtual Node Handling",
+        "description": "Virtual nodes that should be kept, altered, or removed based on inheritance value.",
+    },
+    "misplaced": {
+        "title": "Misplaced Nodes",
+        "description": "Nodes whose current parent may not express a valid IS-A relationship.",
+    },
+    "inheritance": {
+        "title": "Multiple Inheritance",
+        "description": "Concepts that may legitimately belong under more than one parent.",
+    },
+    "naming": {
+        "title": "Naming / Disambiguation",
+        "description": "Labels that may need clearer names, sense labels, or formatting changes.",
+    },
+}
+
+
+def _detect_category_patterns(category: str) -> Dict[str, Any]:
+    """Detect one edit-pattern category at a time.
+
+    This is intentionally separated from /edit-patterns/grouped so the frontend
+    can lazy-load one category/page instead of pulling every suggestion at once.
+    """
+    if category == "duplicate":
+        return detect_duplicate_patterns()
+    if category == "virtual":
+        return detect_virtual_node_patterns()
+    if category == "misplaced":
+        return _detect_misplaced_patterns()
+    if category == "inheritance":
+        return _detect_inheritance_patterns()
+    if category == "naming":
+        return _detect_naming_patterns()
+    raise HTTPException(status_code=404, detail=f"Unknown edit-pattern category: {category}")
+
+
+def _filter_suggestions_by_query(suggestions: List[Dict[str, Any]], q: str) -> List[Dict[str, Any]]:
+    query = q.strip().lower()
+    if not query:
+        return suggestions
+    return [s for s in suggestions if query in str(s).lower()]
+
+
+def _page_suggestions(
+    suggestions: List[Dict[str, Any]],
+    limit: int,
+    offset: int,
+    q: str = "",
+) -> Dict[str, Any]:
+    filtered = _filter_suggestions_by_query(suggestions, q)
+    total = len(filtered)
+    page = filtered[offset : offset + limit]
+    return {
+        "suggestions": page,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + limit < total,
+    }
+
+
+def _category_response(category: str, limit: int, offset: int, q: str = "") -> Dict[str, Any]:
+    detected = _detect_category_patterns(category)
+    suggestions = detected.get("suggestions", [])
+    page = _page_suggestions(suggestions, limit=limit, offset=offset, q=q)
+    meta = PATTERN_CATEGORY_META[category]
 
     return {
-        "categories": categories,
-        "counts": {category["key"]: len(category["suggestions"]) for category in categories},
+        "key": category,
+        "title": meta["title"],
+        "description": meta["description"],
+        "count": page["total"],
+        "suggestions": page["suggestions"],
+        "limit": page["limit"],
+        "offset": page["offset"],
+        "has_more": page["has_more"],
     }
+
+
+def _suggestion_node_ids(suggestion: Dict[str, Any]) -> List[str]:
+    ids: List[str] = []
+    node_id = suggestion.get("node_id")
+    if node_id:
+        ids.append(str(node_id))
+    for node in suggestion.get("nodes") or []:
+        nid = node.get("id")
+        if nid:
+            ids.append(str(nid))
+    return ids
+
+
+@app.get("/edit-patterns/counts")
+def edit_pattern_counts():
+    """Return counts only, without sending every suggestion card to the frontend."""
+    counts: Dict[str, int] = {}
+    categories: List[Dict[str, Any]] = []
+
+    for key, meta in PATTERN_CATEGORY_META.items():
+        detected = _detect_category_patterns(key)
+        count = len(detected.get("suggestions", []))
+        counts[key] = count
+        categories.append(
+            {
+                "key": key,
+                "title": meta["title"],
+                "description": meta["description"],
+                "count": count,
+            }
+        )
+
+    return {"counts": counts, "categories": categories}
+
+
+@app.get("/edit-patterns/highlights")
+def edit_pattern_highlights():
+    """Return a lightweight node_id -> pattern_type map for tree highlighting.
+
+    This avoids loading/rendering all suggestion cards just to color the left tree.
+    """
+    highlights: Dict[str, str] = {}
+    counts: Dict[str, int] = {}
+
+    for key in PATTERN_CATEGORY_META:
+        detected = _detect_category_patterns(key)
+        suggestions = detected.get("suggestions", [])
+        counts[key] = len(suggestions)
+
+        for suggestion in suggestions:
+            for node_id in _suggestion_node_ids(suggestion):
+                highlights[node_id] = key
+
+    return {"highlights": highlights, "counts": counts}
+
+
+@app.get("/edit-patterns/category/{category}")
+def edit_pattern_category(
+    category: str,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    q: str = "",
+):
+    """Return one paginated edit-pattern category."""
+    return _category_response(category, limit=limit, offset=offset, q=q)
+
+
+@app.get("/edit-patterns/grouped")
+def grouped_edit_patterns(
+    limit: int = Query(10, ge=0, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """Return grouped edit-pattern suggestions with a small page per category.
+
+    Backward compatible with the older frontend, but now avoids sending huge
+    payloads by default. Use /edit-patterns/category/{category} for full paging.
+    """
+    categories: List[Dict[str, Any]] = []
+    counts: Dict[str, int] = {}
+
+    for key, meta in PATTERN_CATEGORY_META.items():
+        detected = _detect_category_patterns(key)
+        suggestions = detected.get("suggestions", [])
+        total = len(suggestions)
+        counts[key] = total
+
+        categories.append(
+            {
+                "key": key,
+                "title": meta["title"],
+                "description": meta["description"],
+                "suggestions": suggestions[offset : offset + limit] if limit else [],
+                "count": total,
+                "limit": limit,
+                "offset": offset,
+                "has_more": offset + limit < total if limit else total > 0,
+            }
+        )
+
+    return {"categories": categories, "counts": counts}
 
 
 @app.get("/edit-patterns/duplicates")

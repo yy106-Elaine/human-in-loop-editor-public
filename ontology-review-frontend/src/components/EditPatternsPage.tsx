@@ -17,14 +17,20 @@ import {
   decideEditPattern,
   getConflicts,
   getEditPatternDecisions,
-  getGroupedPatterns,
+  getPatternCategoryPage,
+  getPatternCounts,
   getPrinciples,
   resolveConflict,
   type CollaborationConflict,
   type FinishedChange,
   type PatternCategory,
+  type PatternCategorySummary,
   type PatternSuggestion,
+  type PatternType,
 } from "../api/editPatternsApi";
+
+const PAGE_SIZE = 25;
+const ALL_KEY = "__all__";
 
 const ALTER_ACTIONS: {
   kind: string;
@@ -58,78 +64,234 @@ const PATTERN_COLORS: Record<string, { card: string; bar: string; actionText: st
 
 const DEFAULT_COLOR = { card: "bg-white border-gray-200", bar: "bg-gray-300", actionText: "text-gray-800" };
 
+type StatusFilter = "all" | "unfinished" | "finished" | "conflicts";
+
 interface PrincipleOption {
   id: string;
   title: string;
 }
 
-const ALL_KEY = "__all__";
+function emptyCategory(summary: PatternCategorySummary): PatternCategory {
+  return {
+    key: summary.key,
+    title: summary.title,
+    description: summary.description,
+    suggestions: [],
+    count: summary.count,
+    limit: PAGE_SIZE,
+    offset: 0,
+    has_more: summary.count > 0,
+  };
+}
 
-type StatusFilter = "all" | "unfinished" | "finished" | "conflicts";
+function mergeCategoryPage(
+  existing: PatternCategory | undefined,
+  page: PatternCategory,
+  append: boolean
+): PatternCategory {
+  if (!append || !existing) return page;
+
+  const seen = new Set(existing.suggestions.map((s) => s.id));
+  const additions = page.suggestions.filter((s) => !seen.has(s.id));
+
+  return {
+    ...page,
+    suggestions: [...existing.suggestions, ...additions],
+  };
+}
 
 export function EditPatternsPage({
   selectedNodeId,
   currentUser,
+  isAdmin = false,
+  onCategoriesReloaded,
 }: {
   selectedNodeId?: string | null;
   currentUser: string;
+  isAdmin?: boolean;
+  onCategoriesReloaded?: () => void | Promise<void>;
 }) {
   const [categories, setCategories] = useState<PatternCategory[]>([]);
-  const [activeKey, setActiveKey] = useState("duplicate");
+  const [activeKey, setActiveKey] = useState<PatternType | typeof ALL_KEY>("duplicate");
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [pageLoading, setPageLoading] = useState(false);
   const [decisions, setDecisions] = useState<FinishedChange[]>([]);
   const [conflicts, setConflicts] = useState<CollaborationConflict[]>([]);
 
-  async function load() {
+  async function loadSharedState() {
+    const [decisionData, conflictData] = await Promise.all([
+      getEditPatternDecisions(),
+      getConflicts(),
+    ]);
+    setDecisions(decisionData.decisions ?? []);
+    setConflicts(conflictData.conflicts ?? []);
+  }
+
+  async function loadCategory(
+    key: PatternType,
+    opts: { append?: boolean; q?: string } = {}
+  ) {
+    const existing = categories.find((c) => c.key === key);
+    const offset = opts.append ? existing?.suggestions.length ?? 0 : 0;
+    const page = await getPatternCategoryPage(key, {
+      limit: PAGE_SIZE,
+      offset,
+      q: opts.q ?? query,
+    });
+
+    setCategories((prev) =>
+      prev.map((category) =>
+        category.key === key
+          ? mergeCategoryPage(category, page, Boolean(opts.append))
+          : category
+      )
+    );
+  }
+
+  async function loadInitial() {
     setLoading(true);
     setStatus("");
 
     try {
-      const [data, decisionData, conflictData] = await Promise.all([
-        getGroupedPatterns(),
-        getEditPatternDecisions(),
-        getConflicts(),
-      ]);
+      const [countsData] = await Promise.all([getPatternCounts(), loadSharedState()]);
+      const summaries = countsData.categories ?? [];
+      const initialCategories = summaries.map(emptyCategory);
+      setCategories(initialCategories);
 
-      const loaded = data.categories ?? [];
-      setCategories(loaded);
-      setDecisions(decisionData.decisions ?? []);
-      setConflicts(conflictData.conflicts ?? []);
+      const preferred = summaries.some((c: PatternCategorySummary) => c.key === activeKey)
+        ? activeKey
+        : summaries[0]?.key ?? "duplicate";
 
-      if (loaded.length && !loaded.some((c: PatternCategory) => c.key === activeKey)) {
-        setActiveKey(loaded[0].key);
+      setActiveKey(preferred);
+
+      // Load only the first active category page. This avoids pulling every card at once.
+      if (preferred !== ALL_KEY) {
+        const firstPage = await getPatternCategoryPage(preferred as PatternType, {
+          limit: PAGE_SIZE,
+          offset: 0,
+        });
+
+        setCategories((prev) =>
+          prev.map((category) =>
+            category.key === preferred ? firstPage : category
+          )
+        );
       }
+
+      await onCategoriesReloaded?.();
     } catch (err) {
       console.error(err);
-      setStatus("Could not load editor suggestions. Check backend route /edit-patterns/grouped.");
+      setStatus("Could not load editor suggestions. Check backend pagination routes.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    load();
+    loadInitial();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function refreshCurrentView() {
+    setStatus("");
+    try {
+      await loadSharedState();
+
+      if (activeKey === ALL_KEY) {
+        await Promise.all(categories.map((c) => loadCategory(c.key, { append: false })));
+      } else {
+        await loadCategory(activeKey, { append: false });
+      }
+
+      await onCategoriesReloaded?.();
+    } catch (err) {
+      console.error(err);
+      setStatus("Could not refresh the current view.");
+    }
+  }
+
+  async function handleCategoryClick(key: PatternType | typeof ALL_KEY) {
+    setActiveKey(key);
+    setStatus("");
+
+    if (key === ALL_KEY) {
+      // Load one page per category only when All is opened.
+      setPageLoading(true);
+      try {
+        await Promise.all(categories.map((c) => loadCategory(c.key, { append: false })));
+      } catch (err) {
+        console.error(err);
+        setStatus("Could not load all category previews.");
+      } finally {
+        setPageLoading(false);
+      }
+      return;
+    }
+
+    const category = categories.find((c) => c.key === key);
+    if (!category || category.suggestions.length > 0) return;
+
+    setPageLoading(true);
+    try {
+      await loadCategory(key, { append: false });
+    } catch (err) {
+      console.error(err);
+      setStatus(`Could not load ${key} suggestions.`);
+    } finally {
+      setPageLoading(false);
+    }
+  }
+
+  async function handleLoadMore() {
+    if (activeKey === ALL_KEY) return;
+
+    setPageLoading(true);
+    setStatus("");
+    try {
+      await loadCategory(activeKey, { append: true });
+    } catch (err) {
+      console.error(err);
+      setStatus("Could not load more suggestions.");
+    } finally {
+      setPageLoading(false);
+    }
+  }
+
+  async function handleSearch() {
+    if (activeKey === ALL_KEY) {
+      setStatus("Search is category-specific. Select a category first, then search.");
+      return;
+    }
+
+    setPageLoading(true);
+    setStatus("");
+    try {
+      await loadCategory(activeKey, { append: false, q: query });
+    } catch (err) {
+      console.error(err);
+      setStatus("Could not search this category.");
+    } finally {
+      setPageLoading(false);
+    }
+  }
 
   const isAll = activeKey === ALL_KEY;
   const activeCategory = categories.find((c) => c.key === activeKey);
   const openConflicts = conflicts.filter((c) => c.status === "open");
 
-  const filteredSuggestions = useMemo(() => {
-    const suggestions = isAll
-      ? categories.flatMap((c) => c.suggestions)
-      : activeCategory?.suggestions ?? [];
+  const visibleSuggestions = useMemo(() => {
+    if (isAll) return categories.flatMap((c) => c.suggestions);
+    return activeCategory?.suggestions ?? [];
+  }, [isAll, categories, activeCategory]);
 
-    const q = query.trim().toLowerCase();
-    if (!q) return suggestions;
+  const totalCount = isAll
+    ? categories.reduce((sum, c) => sum + (c.count ?? c.suggestions.length), 0)
+    : activeCategory?.count ?? activeCategory?.suggestions.length ?? 0;
 
-    return suggestions.filter((suggestion) =>
-      JSON.stringify(suggestion).toLowerCase().includes(q)
-    );
-  }, [isAll, categories, activeCategory, query]);
+  const hasMore = !isAll && Boolean(activeCategory?.has_more);
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gray-50">
@@ -148,11 +310,12 @@ export function EditPatternsPage({
             const meta = ISSUE_META[category.key] ?? ISSUE_META.duplicate;
             const Icon = meta.icon;
             const active = activeKey === category.key;
+            const count = category.count ?? category.suggestions.length;
 
             return (
               <button
                 key={category.key}
-                onClick={() => setActiveKey(category.key)}
+                onClick={() => handleCategoryClick(category.key)}
                 className={`shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   active
                     ? meta.active
@@ -166,7 +329,7 @@ export function EditPatternsPage({
                     active ? "bg-white/20 text-white" : "bg-white text-gray-500"
                   }`}
                 >
-                  {category.suggestions.length}
+                  {count}
                 </span>
               </button>
             );
@@ -174,14 +337,14 @@ export function EditPatternsPage({
 
           {categories.length > 0 && (() => {
             const active = activeKey === ALL_KEY;
-            const totalCount = categories.reduce(
-              (sum, c) => sum + c.suggestions.length,
+            const count = categories.reduce(
+              (sum, c) => sum + (c.count ?? c.suggestions.length),
               0
             );
 
             return (
               <button
-                onClick={() => setActiveKey(ALL_KEY)}
+                onClick={() => handleCategoryClick(ALL_KEY)}
                 className={`shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
                   active
                     ? "bg-gray-900 text-white"
@@ -195,7 +358,7 @@ export function EditPatternsPage({
                     active ? "bg-white/20 text-white" : "bg-white text-gray-500"
                   }`}
                 >
-                  {totalCount}
+                  {count}
                 </span>
               </button>
             );
@@ -227,7 +390,7 @@ export function EditPatternsPage({
           </div>
 
           <button
-            onClick={load}
+            onClick={refreshCurrentView}
             className="inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-50 shrink-0"
           >
             <RefreshCw size={15} />
@@ -242,8 +405,12 @@ export function EditPatternsPage({
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search within this edit type..."
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSearch();
+              }}
+              placeholder={isAll ? "Select a category to search..." : "Search this category..."}
+              disabled={isAll}
+              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:bg-gray-100 disabled:text-gray-400"
             />
           </div>
         </div>
@@ -258,7 +425,7 @@ export function EditPatternsPage({
       <div className="flex-1 min-h-0 overflow-y-auto p-6">
         {loading ? (
           <div className="h-full flex items-center justify-center text-sm text-gray-500">
-            Loading editor suggestions...
+            Loading editor counts...
           </div>
         ) : !isAll && !activeCategory ? (
           <div className="h-full flex items-center justify-center text-sm text-gray-500">
@@ -270,7 +437,8 @@ export function EditPatternsPage({
               <ConflictResolutionPanel
                 conflicts={openConflicts}
                 currentUser={currentUser}
-                onResolved={load}
+                isAdmin={isAdmin}
+                onResolved={refreshCurrentView}
               />
             ) : (
               <>
@@ -281,20 +449,27 @@ export function EditPatternsPage({
                     </h3>
                     <p className="text-sm text-gray-600 mt-1">
                       {isAll
-                        ? "Every detected edit pattern across all issue types."
+                        ? "Previewing one loaded page per category. Open a category to page through all suggestions."
                         : activeCategory!.description}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Loaded {visibleSuggestions.length} of {totalCount} suggestion{totalCount === 1 ? "" : "s"}.
                     </p>
                   </div>
                 )}
 
                 {statusFilter !== "finished" && (
                   <div className="space-y-4">
-                    {filteredSuggestions.length === 0 ? (
+                    {pageLoading && visibleSuggestions.length === 0 ? (
                       <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
-                        No suggestions found for this category.
+                        Loading suggestions...
+                      </div>
+                    ) : visibleSuggestions.length === 0 ? (
+                      <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
+                        No suggestions loaded for this category.
                       </div>
                     ) : (
-                      filteredSuggestions.map((suggestion) => (
+                      visibleSuggestions.map((suggestion) => (
                         <SuggestionCard
                           key={suggestion.id}
                           suggestion={suggestion}
@@ -303,9 +478,21 @@ export function EditPatternsPage({
                           conflict={conflicts.find(
                             (c) => c.pattern_id === suggestion.id && c.status === "open"
                           )}
-                          onDecision={load}
+                          onDecision={refreshCurrentView}
                         />
                       ))
+                    )}
+
+                    {hasMore && (
+                      <div className="pt-2">
+                        <button
+                          onClick={handleLoadMore}
+                          disabled={pageLoading}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {pageLoading ? "Loading..." : `Load more ${activeCategory?.title ?? "suggestions"}`}
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -352,7 +539,7 @@ function SuggestionCard({
   currentUser: string;
   decisions: FinishedChange[];
   conflict?: CollaborationConflict;
-  onDecision: () => void;
+  onDecision: () => void | Promise<void>;
 }) {
   const [mode, setMode] = useState<"approve" | "alter" | "reject" | null>(null);
   const [comment, setComment] = useState("");
@@ -394,7 +581,7 @@ function SuggestionCard({
       setActionField("");
       setPrincipleUpdate("");
       setLinkPrincipleId(null);
-      onDecision();
+      await onDecision();
     } catch (err) {
       console.error(err);
       setStatus("Could not save decision.");
@@ -620,11 +807,13 @@ function SuggestionCard({
 function ConflictResolutionPanel({
   conflicts,
   currentUser,
+  isAdmin,
   onResolved,
 }: {
   conflicts: CollaborationConflict[];
   currentUser: string;
-  onResolved: () => void;
+  isAdmin: boolean;
+  onResolved: () => void | Promise<void>;
 }) {
   const [status, setStatus] = useState("");
 
@@ -632,6 +821,11 @@ function ConflictResolutionPanel({
     conflict: CollaborationConflict,
     decision: "approve" | "alter" | "reject"
   ) {
+    if (!isAdmin) {
+      setStatus("Only admins can resolve conflicts.");
+      return;
+    }
+
     setStatus("");
 
     try {
@@ -639,6 +833,7 @@ function ConflictResolutionPanel({
         reviewer: currentUser,
         consensus_decision: decision,
         comment: `Consensus resolved as ${decision}`,
+        is_admin: isAdmin,
       });
       await onResolved();
     } catch (err) {
@@ -653,6 +848,12 @@ function ConflictResolutionPanel({
       <p className="text-sm text-gray-600 mt-1">
         Resolve cases where multiple reviewers made incompatible decisions on the same suggestion.
       </p>
+
+      {!isAdmin && (
+        <p className="mt-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          You can view conflicts, but only admins can resolve them.
+        </p>
+      )}
 
       {status && <p className="mt-2 text-sm text-red-700">{status}</p>}
 
@@ -681,7 +882,8 @@ function ConflictResolutionPanel({
                   <button
                     key={decision}
                     onClick={() => chooseConsensus(conflict, decision)}
-                    className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-xs font-medium hover:bg-gray-800"
+                    disabled={!isAdmin}
+                    className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-xs font-medium hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
                   >
                     Consensus: {decision}
                   </button>

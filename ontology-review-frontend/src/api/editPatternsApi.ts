@@ -39,7 +39,20 @@ export interface PatternCategory {
   title: string;
   description: string;
   suggestions: PatternSuggestion[];
+  count?: number;
+  limit?: number;
+  offset?: number;
+  has_more?: boolean;
 }
+
+export interface PatternCategorySummary {
+  key: PatternType;
+  title: string;
+  description: string;
+  count: number;
+}
+
+export type PatternCounts = Partial<Record<PatternType, number>>;
 
 export interface Principle {
   id: string;
@@ -137,9 +150,50 @@ export interface BatchJob {
   resolved_at?: string;
 }
 
-export async function getGroupedPatterns() {
-  const res = await fetch(`${API_BASE}/edit-patterns/grouped`);
+export async function getGroupedPatterns(limit = 10, offset = 0) {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+  });
+
+  const res = await fetch(`${API_BASE}/edit-patterns/grouped?${params.toString()}`);
   if (!res.ok) throw new Error("Failed to load grouped edit patterns");
+  return res.json();
+}
+
+export async function getPatternCounts(): Promise<{
+  counts: PatternCounts;
+  categories: PatternCategorySummary[];
+}> {
+  const res = await fetch(`${API_BASE}/edit-patterns/counts`);
+  if (!res.ok) throw new Error("Failed to load edit pattern counts");
+  return res.json();
+}
+
+export async function getPatternHighlights(): Promise<{
+  highlights: Record<string, PatternType>;
+  counts: PatternCounts;
+}> {
+  const res = await fetch(`${API_BASE}/edit-patterns/highlights`);
+  if (!res.ok) throw new Error("Failed to load edit pattern highlights");
+  return res.json();
+}
+
+export async function getPatternCategoryPage(
+  category: PatternType,
+  options: { limit?: number; offset?: number; q?: string } = {}
+): Promise<PatternCategory> {
+  const params = new URLSearchParams({
+    limit: String(options.limit ?? 25),
+    offset: String(options.offset ?? 0),
+  });
+
+  if (options.q?.trim()) params.set("q", options.q.trim());
+
+  const res = await fetch(
+    `${API_BASE}/edit-patterns/category/${encodeURIComponent(category)}?${params.toString()}`
+  );
+  if (!res.ok) throw new Error(`Failed to load ${category} patterns`);
   return res.json();
 }
 
