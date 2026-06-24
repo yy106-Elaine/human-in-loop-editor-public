@@ -5,6 +5,7 @@ structured error/fix-type classification. Stored in memory with defaults;
 exposed via API so users can edit them.
 """
 
+from app.store import _get_supabase
 from copy import deepcopy
 from typing import Dict
 
@@ -148,23 +149,88 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
 }
 
 _PROMPTS: Dict[str, Dict[str, str]] = deepcopy(_DEFAULT_PROMPTS)
+_PROMPTS_LOADED = False
 
+
+def _seed_defaults_to_supabase(sb) -> None:
+    """If the prompts table is empty, write the defaults into it once."""
+    try:
+        existing = sb.table("prompts").select("edit_type").execute()
+        have = {row["edit_type"] for row in existing.data}
+        rows_to_insert = []
+        for edit_type, p in _DEFAULT_PROMPTS.items():
+            if edit_type not in have:
+                rows_to_insert.append({
+                    "edit_type": edit_type,
+                    "label": p.get("label", ""),
+                    "system": p["system"],
+                    "user": p["user"],
+                })
+        if rows_to_insert:
+            sb.table("prompts").insert(rows_to_insert).execute()
+            print(f"[prompts] seeded {len(rows_to_insert)} default prompts to Supabase")
+    except Exception as e:
+        print(f"[prompts] could not seed defaults: {e}")
+
+
+def _load_prompts() -> None:
+    """Load prompts from Supabase into memory once. Falls back to in-memory
+    defaults if Supabase is unavailable."""
+    global _PROMPTS_LOADED
+    if _PROMPTS_LOADED:
+        return
+    sb = _get_supabase()
+    if sb is None:
+        _PROMPTS_LOADED = True
+        return
+    try:
+        _seed_defaults_to_supabase(sb)
+        rows = sb.table("prompts").select("edit_type,label,system,user").execute()
+        for row in rows.data:
+            et = row["edit_type"]
+            if et in _PROMPTS:
+                _PROMPTS[et] = {
+                    "label": row.get("label", _PROMPTS[et].get("label", "")),
+                    "system": row["system"],
+                    "user": row["user"],
+                }
+        print(f"[prompts] loaded {len(rows.data)} prompts from Supabase")
+    except Exception as e:
+        print(f"[prompts] could not load from Supabase: {e}")
+    _PROMPTS_LOADED = True
 
 def get_all_prompts() -> Dict[str, Dict[str, str]]:
+    _load_prompts()
     return deepcopy(_PROMPTS)
 
 
 def get_prompt(edit_type: str) -> Dict[str, str]:
+    _load_prompts()
     return deepcopy(_PROMPTS[edit_type])
 
 
 def update_prompt(edit_type: str, system: str | None = None, user: str | None = None) -> Dict[str, str]:
+    _load_prompts()
     if edit_type not in _PROMPTS:
         raise KeyError(edit_type)
     if system is not None:
         _PROMPTS[edit_type]["system"] = system
     if user is not None:
         _PROMPTS[edit_type]["user"] = user
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("prompts").upsert({
+                "edit_type": edit_type,
+                "label": _PROMPTS[edit_type].get("label", ""),
+                "system": _PROMPTS[edit_type]["system"],
+                "user": _PROMPTS[edit_type]["user"],
+                "updated_at": "now()",
+            }).execute()
+        except Exception as e:
+            print(f"[prompts] could not persist {edit_type}: {e}")
+
     return deepcopy(_PROMPTS[edit_type])
 
 
@@ -172,4 +238,18 @@ def reset_prompt(edit_type: str) -> Dict[str, str]:
     if edit_type not in _DEFAULT_PROMPTS:
         raise KeyError(edit_type)
     _PROMPTS[edit_type] = deepcopy(_DEFAULT_PROMPTS[edit_type])
+
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("prompts").upsert({
+                "edit_type": edit_type,
+                "label": _PROMPTS[edit_type].get("label", ""),
+                "system": _PROMPTS[edit_type]["system"],
+                "user": _PROMPTS[edit_type]["user"],
+                "updated_at": "now()",
+            }).execute()
+        except Exception as e:
+            print(f"[prompts] could not persist reset for {edit_type}: {e}")
+
     return deepcopy(_PROMPTS[edit_type])

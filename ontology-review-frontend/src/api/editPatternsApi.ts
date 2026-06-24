@@ -399,3 +399,56 @@ export async function decideManualEdit(
   if (!res.ok) throw new Error(`Failed to review manual edit: ${await res.text()}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Editable LLM prompts (one per edit type) — talks to the real /prompts routes
+// ---------------------------------------------------------------------------
+
+// Backend prompt keys. NOTE: backend uses "multiple_inheritance",
+// while the frontend PatternType uses "inheritance".
+export type PromptEditType =
+  | "duplicate"
+  | "virtual"
+  | "misplaced"
+  | "multiple_inheritance"
+  | "naming";
+
+export interface EditablePrompt {
+  label: string;
+  system: string;
+  user: string;
+}
+
+// Map the frontend PatternType -> backend prompt key
+export function toPromptEditType(pattern: PatternType): PromptEditType {
+  return pattern === "inheritance" ? "multiple_inheritance" : pattern;
+}
+
+export async function getPrompts(): Promise<{ prompts: Record<PromptEditType, EditablePrompt> }> {
+  const res = await fetch(`${API_BASE}/prompts`);
+  if (!res.ok) throw new Error("Failed to load prompts");
+  return res.json();
+}
+
+export async function updatePrompt(
+  editType: PromptEditType,
+  body: { system?: string; user?: string }
+): Promise<{ edit_type: string; prompt: EditablePrompt }> {
+  const res = await fetch(`${API_BASE}/prompts/${encodeURIComponent(editType)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to update prompt: ${await res.text()}`);
+  return res.json();
+}
+
+export async function resetPrompt(
+  editType: PromptEditType
+): Promise<{ edit_type: string; prompt: EditablePrompt }> {
+  const res = await fetch(`${API_BASE}/prompts/${encodeURIComponent(editType)}/reset`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Failed to reset prompt: ${await res.text()}`);
+  return res.json();
+}

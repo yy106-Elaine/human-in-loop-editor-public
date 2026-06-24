@@ -1,3 +1,4 @@
+import { PromptEditor } from "./PromptEditor";
 import { useEffect, useMemo, useState, type LucideIcon } from "react";
 import {
   AlertTriangle,
@@ -120,7 +121,8 @@ export function EditPatternsPage({
   const [pageLoading, setPageLoading] = useState(false);
   const [decisions, setDecisions] = useState<FinishedChange[]>([]);
   const [conflicts, setConflicts] = useState<CollaborationConflict[]>([]);
-
+  const [promptEditorFor, setPromptEditorFor] = useState<PatternType | null>(null);
+  
   async function loadSharedState() {
     const [decisionData, conflictData] = await Promise.all([
       getEditPatternDecisions(),
@@ -444,9 +446,20 @@ export function EditPatternsPage({
               <>
                 {statusFilter !== "finished" && (
                   <div className="mb-4">
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      {isAll ? "All Edit Patterns" : activeCategory!.title}
-                    </h3>
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="text-lg font-semibold text-gray-900">
+                        {isAll ? "All Edit Patterns" : activeCategory!.title}
+                      </h3>
+                      {!isAll && activeCategory && (
+                        <button
+                          onClick={() => setPromptEditorFor(activeCategory.key)}
+                          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-700"
+                        >
+                          <Pencil size={13} />
+                          View / Edit LLM prompt
+                        </button>
+                      )}
+                    </div>
                     <p className="text-sm text-gray-600 mt-1">
                       {isAll
                         ? "Previewing one loaded page per category. Open a category to page through all suggestions."
@@ -524,6 +537,13 @@ export function EditPatternsPage({
           </div>
         )}
       </div>
+
+      {promptEditorFor && (
+        <PromptEditor
+          patternType={promptEditorFor}
+          onClose={() => setPromptEditorFor(null)}
+        />
+      )}
     </div>
   );
 }
