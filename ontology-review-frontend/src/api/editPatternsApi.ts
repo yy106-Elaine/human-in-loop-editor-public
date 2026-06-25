@@ -452,3 +452,18 @@ export async function resetPrompt(
   if (!res.ok) throw new Error(`Failed to reset prompt: ${await res.text()}`);
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Force re-run ONE node's AI score with the current prompt (costs ~1 OpenAI call)
+// ---------------------------------------------------------------------------
+export async function rerunNode(
+  cacheKey: string
+): Promise<{ ok: boolean; cache_key: string; suggestion: PatternSuggestion }> {
+  const res = await fetch(`${API_BASE}/edit-patterns/rerun-node`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cache_key: cacheKey }),
+  });
+  if (!res.ok) throw new Error(`Failed to re-run node: ${await res.text()}`);
+  return res.json();
+}

@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.services.ai_suggestions import generate_ai_suggestions
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from app.services.ai_scoring import score_candidate
+from app.services.ai_scoring import score_candidate, _CACHE
 from app.services.edit_patterns import (
     detect_duplicate_patterns,
     detect_virtual_node_patterns,
@@ -1014,6 +1014,67 @@ def grouped_edit_patterns(
 
     return {"categories": categories, "counts": counts}
 
+class RerunNodeRequest(BaseModel):
+    cache_key: str
+
+
+@app.post("/edit-patterns/rerun-node")
+def rerun_node(body: RerunNodeRequest):
+    """Force re-score ONE candidate with the current prompt, by deleting its
+    cached score and re-running its category detector. Because other nodes are
+    still cached, only this one actually calls OpenAI (costs ~1 call)."""
+    cache_key = body.cache_key
+
+    # 1. Infer the category from the cache_key prefix (before "::")
+    prefix = cache_key.split("::", 1)[0] if "::" in cache_key else ""
+    prefix_to_category = {
+        "duplicate": "duplicate",
+        "virtual": "virtual",
+        "misplaced": "misplaced",
+        "inheritance": "inheritance",
+        "naming": "naming",
+    }
+    category = prefix_to_category.get(prefix)
+    if category is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot infer category from cache_key: {cache_key}",
+        )
+
+    # 2. Drop the old cached result (in-memory + Supabase) so it gets re-scored
+    _CACHE.pop(cache_key, None)
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("ai_scores").delete().eq("cache_key", cache_key).execute()
+        except Exception as e:
+            print(f"[main] could not delete old score for {cache_key}: {e}")
+
+    # 3. Re-run the category detector. Only the deleted key calls OpenAI;
+    #    every other node is served from the warm cache.
+    import os
+    old_skip = os.environ.get("SKIP_LLM")
+    os.environ["SKIP_LLM"] = "false"  # force a real OpenAI call for the deleted key
+    try:
+        detected = _detect_category_patterns(category)
+    finally:
+        if old_skip is None:
+            os.environ.pop("SKIP_LLM", None)
+        else:
+            os.environ["SKIP_LLM"] = old_skip
+
+    # 4. Find the freshly scored suggestion for this cache_key
+    match = next(
+        (s for s in detected.get("suggestions", []) if s.get("id") == cache_key),
+        None,
+    )
+    if match is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Re-run did not produce a result for {cache_key}",
+        )
+
+    return {"ok": True, "cache_key": cache_key, "suggestion": match}
 
 @app.get("/edit-patterns/duplicates")
 def duplicate_edit_patterns():

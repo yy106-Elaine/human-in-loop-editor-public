@@ -10,6 +10,7 @@ import {
   Layers,
   Pencil,
   RefreshCw,
+  RotateCcw,
   Search,
   Trash2,
   X,
@@ -22,6 +23,7 @@ import {
   getPatternCounts,
   getPrinciples,
   resolveConflict,
+  rerunNode,
   type CollaborationConflict,
   type FinishedChange,
   type PatternCategory,
@@ -570,6 +572,7 @@ function SuggestionCard({
   const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
   const [linkPrincipleId, setLinkPrincipleId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
+  const [rerunning, setRerunning] = useState(false);
 
   useEffect(() => {
     getPrinciples()
@@ -605,6 +608,28 @@ function SuggestionCard({
     } catch (err) {
       console.error(err);
       setStatus("Could not save decision.");
+    }
+  }
+
+  async function handleRerun() {
+    if (!confirm("Re-run this node with the current prompt? This calls OpenAI (costs ~1 request).")) {
+      return;
+    }
+    setRerunning(true);
+    setStatus("");
+    try {
+      const res = await rerunNode(suggestion.id);
+      setStatus(
+        `Re-ran. New action: ${res.suggestion.suggested_action} (${Math.round(
+          res.suggestion.confidence * 100
+        )}%).`
+      );
+      await onDecision();
+    } catch (err) {
+      console.error(err);
+      setStatus("Could not re-run this node.");
+    } finally {
+      setRerunning(false);
     }
   }
 
@@ -703,6 +728,15 @@ function SuggestionCard({
         >
           <X size={13} />
           Reject
+        </button>
+
+        <button
+          onClick={handleRerun}
+          disabled={rerunning}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          <RotateCcw size={13} />
+          {rerunning ? "Re-running..." : "Re-run AI"}
         </button>
       </div>
 

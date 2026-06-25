@@ -66,19 +66,20 @@ def score_candidate(
     cache_key: str,
     candidate_text: str,
     fallback: Dict[str, Any],
+    force: bool = False,
 ) -> Dict[str, Any]:
     """Score one candidate. Reads ONLY from the in-memory cache (primed once
     via prime_cache). Never queries Supabase per-key, so it can't trigger
     the N+1 connection storm."""
     prime_cache()
 
-    # 1. In-memory cache hit -> return directly, never touch Supabase
-    if cache_key in _CACHE:
+    # 1. In-memory cache hit -> return directly (unless force re-run)
+    if not force and cache_key in _CACHE:
         return _CACHE[cache_key]
 
     # 2. Kill switch: when SKIP_LLM is on, a cache miss returns the
-    #    rule-based fallback instead of calling OpenAI
-    if os.getenv("SKIP_LLM", "").lower() in ("1", "true", "yes"):
+    #    rule-based fallback instead of calling OpenAI (unless force re-run)
+    if not force and os.getenv("SKIP_LLM", "").lower() in ("1", "true", "yes"):
         return dict(fallback)
 
     # 3. Cache miss -> call OpenAI
