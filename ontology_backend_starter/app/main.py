@@ -1300,3 +1300,348 @@ def reset_one_prompt(edit_type: str) -> Dict[str, Any]:
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown edit type: {edit_type}")
     return {"edit_type": edit_type, "prompt": restored}
+
+
+# ---------------------------------------------------------------------------
+# Active learning / self-learning from human decisions
+# ---------------------------------------------------------------------------
+
+LEARNING_MODEL: Dict[str, Any] = {
+    "trained_at": None,
+    "examples": 0,
+    "rules": {},
+    "global_majority": "approve",
+}
+
+AUTO_REVIEW_ITEMS: List[Dict[str, Any]] = []
+
+
+class LearningTrainRequest(BaseModel):
+    reviewer: Optional[str] = "Unassigned"
+    is_admin: Optional[bool] = False
+
+
+class LearningPredictRequest(BaseModel):
+    suggestion: Dict[str, Any]
+
+
+class AutoReviewDecisionRequest(BaseModel):
+    reviewer: Optional[str] = "Unassigned"
+    approve: bool
+    is_admin: Optional[bool] = False
+    comment: Optional[str] = ""
+
+
+def _normalize_action(action: Optional[str]) -> str:
+    return (action or "").strip().lower().replace(" ", "_")
+
+
+def _pattern_decision_lookup() -> Dict[str, Dict[str, Any]]:
+    """Most recent human decision for each pattern id."""
+    latest: Dict[str, Dict[str, Any]] = {}
+    for row in PATTERN_DECISIONS:
+        latest[row.get("pattern_id", "")] = row
+    return latest
+
+
+def _suggestion_signature(suggestion: Dict[str, Any]) -> str:
+    """Compact feature key for simple active learning.
+
+    This intentionally stays interpretable for demo/research use. It learns from
+    pattern type + suggested action instead of using opaque RL.
+    """
+    pattern_type = suggestion.get("pattern_type", "unknown")
+    action = _normalize_action(suggestion.get("suggested_action"))
+    node_count = len(suggestion.get("nodes") or [])
+    confidence = float(suggestion.get("confidence") or 0)
+
+    if confidence >= 0.85:
+        confidence_bucket = "high"
+    elif confidence >= 0.65:
+        confidence_bucket = "medium"
+    else:
+        confidence_bucket = "low"
+
+    if node_count <= 1:
+        node_bucket = "single"
+    elif node_count <= 3:
+        node_bucket = "few"
+    else:
+        node_bucket = "many"
+
+    return f"{pattern_type}|{action}|{confidence_bucket}|{node_bucket}"
+
+
+def _train_learning_model() -> Dict[str, Any]:
+    """Train a lightweight, interpretable rule learner from human decisions."""
+    decision_counts: Dict[str, int] = {}
+    rule_counts: Dict[str, Dict[str, int]] = {}
+
+    for row in PATTERN_DECISIONS:
+        decision = row.get("decision")
+        if decision not in {"approve", "alter", "reject"}:
+            continue
+
+        payload = row.get("payload") or {}
+        suggestion = {
+            "id": row.get("pattern_id"),
+            "pattern_type": payload.get("pattern_type", row.get("pattern_id", "").split("::")[0]),
+            "suggested_action": payload.get("suggested_action", row.get("altered_action", "")),
+            "confidence": payload.get("confidence", 0.75),
+            "nodes": payload.get("nodes", []),
+        }
+        signature = _suggestion_signature(suggestion)
+
+        decision_counts[decision] = decision_counts.get(decision, 0) + 1
+        rule_counts.setdefault(signature, {})
+        rule_counts[signature][decision] = rule_counts[signature].get(decision, 0) + 1
+
+    rules: Dict[str, Dict[str, Any]] = {}
+    for signature, counts in rule_counts.items():
+        total = sum(counts.values())
+        best_decision, best_count = max(counts.items(), key=lambda item: item[1])
+        rules[signature] = {
+            "decision": best_decision,
+            "confidence": round(best_count / total, 3),
+            "support": total,
+            "counts": counts,
+        }
+
+    global_majority = "approve"
+    if decision_counts:
+        global_majority = max(decision_counts.items(), key=lambda item: item[1])[0]
+
+    LEARNING_MODEL.update(
+        {
+            "trained_at": now_iso(),
+            "examples": sum(decision_counts.values()),
+            "rules": rules,
+            "global_majority": global_majority,
+            "decision_counts": decision_counts,
+        }
+    )
+    return LEARNING_MODEL
+
+
+def _heuristic_prediction(suggestion: Dict[str, Any]) -> Dict[str, Any]:
+    """Fallback when there are not enough training examples."""
+    pattern_type = suggestion.get("pattern_type")
+    action = _normalize_action(suggestion.get("suggested_action"))
+    confidence = float(suggestion.get("confidence") or 0)
+    node_count = len(suggestion.get("nodes") or [])
+
+    # Conservative, explainable defaults.
+    decision = "approve"
+    score = 0.55
+    reason = "Fallback heuristic: not enough human decisions to fully train the learner yet."
+
+    if pattern_type == "virtual" and ("remove" in action or "delete" in action) and node_count <= 1:
+        decision = "approve"
+        score = 0.78
+        reason = "Virtual node with low structural value often receives approval for removal."
+    elif pattern_type == "duplicate" and ("merge" in action or "duplicate" in action):
+        decision = "approve" if confidence >= 0.75 else "alter"
+        score = 0.72 if confidence >= 0.75 else 0.62
+        reason = "Duplicate suggestions are usually approved when confidence is strong; otherwise they need alteration."
+    elif pattern_type == "naming":
+        decision = "alter"
+        score = 0.68
+        reason = "Naming issues usually require a human-provided replacement label."
+    elif pattern_type == "misplaced":
+        decision = "alter"
+        score = 0.66
+        reason = "Misplaced nodes usually require choosing a better parent rather than direct approval."
+    elif pattern_type == "inheritance":
+        decision = "alter"
+        score = 0.64
+        reason = "Multiple inheritance candidates usually require a reviewer to specify the additional parent."
+
+    return {
+        "decision": decision,
+        "confidence": score,
+        "source": "heuristic",
+        "reason": reason,
+        "support": 0,
+    }
+
+
+def _predict_suggestion_decision(suggestion: Dict[str, Any]) -> Dict[str, Any]:
+    if LEARNING_MODEL.get("trained_at") is None:
+        _train_learning_model()
+
+    signature = _suggestion_signature(suggestion)
+    rule = (LEARNING_MODEL.get("rules") or {}).get(signature)
+
+    if rule and rule.get("support", 0) >= 2:
+        return {
+            "decision": rule["decision"],
+            "confidence": rule["confidence"],
+            "source": "learned_rule",
+            "reason": (
+                f"Matched learned rule {signature!r} based on "
+                f"{rule['support']} prior human decision(s)."
+            ),
+            "support": rule["support"],
+            "signature": signature,
+        }
+
+    heuristic = _heuristic_prediction(suggestion)
+    heuristic["signature"] = signature
+    return heuristic
+
+
+def _all_current_suggestions(category: str = "all") -> List[Dict[str, Any]]:
+    keys = list(PATTERN_CATEGORY_META.keys()) if category == "all" else [category]
+    suggestions: List[Dict[str, Any]] = []
+
+    for key in keys:
+        detected = _detect_category_patterns(key)
+        for suggestion in detected.get("suggestions", []):
+            suggestions.append(suggestion)
+
+    return suggestions
+
+
+@app.get("/learning/status")
+def learning_status():
+    """Return current active-learning model summary."""
+    if LEARNING_MODEL.get("trained_at") is None:
+        _train_learning_model()
+    return {
+        "model": {
+            "trained_at": LEARNING_MODEL.get("trained_at"),
+            "examples": LEARNING_MODEL.get("examples"),
+            "rule_count": len(LEARNING_MODEL.get("rules") or {}),
+            "global_majority": LEARNING_MODEL.get("global_majority"),
+            "decision_counts": LEARNING_MODEL.get("decision_counts", {}),
+        },
+        "auto_review_count": len([x for x in AUTO_REVIEW_ITEMS if x.get("status") == "pending"]),
+    }
+
+
+@app.post("/learning/train")
+def train_learning_model(body: LearningTrainRequest):
+    """Train/retrain from human pattern decisions."""
+    model = _train_learning_model()
+    log_event(
+        node_id="learning",
+        action_type="learning_train",
+        reviewer=body.reviewer,
+        payload={
+            "examples": model.get("examples"),
+            "rule_count": len(model.get("rules") or {}),
+        },
+    )
+    return {"ok": True, "model": model}
+
+
+@app.post("/learning/predict")
+def predict_learning_decision(body: LearningPredictRequest):
+    """Predict approve/alter/reject for one suggestion."""
+    prediction = _predict_suggestion_decision(body.suggestion)
+    return {"prediction": prediction}
+
+
+@app.get("/learning/auto-review")
+def learning_auto_review(
+    category: str = "all",
+    threshold: float = Query(0.85, ge=0.0, le=1.0),
+    limit: int = Query(50, ge=1, le=250),
+):
+    """Return high-confidence learned predictions for unresolved suggestions."""
+    reviewed = _pattern_decision_lookup()
+    existing_pending = {
+        item["pattern_id"]: item
+        for item in AUTO_REVIEW_ITEMS
+        if item.get("status") == "pending"
+    }
+
+    candidates: List[Dict[str, Any]] = []
+    for suggestion in _all_current_suggestions(category):
+        pattern_id = suggestion.get("id")
+        if not pattern_id or pattern_id in reviewed:
+            continue
+
+        prediction = _predict_suggestion_decision(suggestion)
+        if prediction.get("confidence", 0) < threshold:
+            continue
+
+        if pattern_id in existing_pending:
+            item = existing_pending[pattern_id]
+            item["prediction"] = prediction
+            item["suggestion"] = suggestion
+        else:
+            item = {
+                "id": f"auto-review-{len(AUTO_REVIEW_ITEMS) + 1}",
+                "pattern_id": pattern_id,
+                "suggestion": suggestion,
+                "prediction": prediction,
+                "status": "pending",
+                "created_at": now_iso(),
+            }
+            AUTO_REVIEW_ITEMS.append(item)
+
+        candidates.append(item)
+        if len(candidates) >= limit:
+            break
+
+    return {"items": candidates, "threshold": threshold, "count": len(candidates)}
+
+
+@app.post("/learning/auto-review/{item_id}/decision")
+def decide_learning_auto_review(item_id: str, body: AutoReviewDecisionRequest):
+    """Admin approval/rejection for a learned auto-decision candidate."""
+    if not body.is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can approve learned auto-decisions")
+
+    item = next((x for x in AUTO_REVIEW_ITEMS if x.get("id") == item_id), None)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Auto-review item not found")
+    if item.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Auto-review item already resolved")
+
+    item["status"] = "approved" if body.approve else "rejected"
+    item["resolved_by"] = body.reviewer or "Unassigned"
+    item["resolved_at"] = now_iso()
+    item["comment"] = body.comment or ""
+
+    if body.approve:
+        prediction = item["prediction"]
+        suggestion = item["suggestion"]
+        record = {
+            "id": f"pattern-decision-{len(PATTERN_DECISIONS) + 1}",
+            "pattern_id": item["pattern_id"],
+            "decision": prediction["decision"],
+            "reviewer": body.reviewer or "Learning System",
+            "comment": body.comment or "Admin-approved learned auto-decision.",
+            "altered_action": None,
+            "payload": {
+                "pattern_type": suggestion.get("pattern_type"),
+                "suggested_action": suggestion.get("suggested_action"),
+                "title": suggestion.get("title"),
+                "learning_prediction": prediction,
+                "auto_review_id": item_id,
+            },
+            "created_at": now_iso(),
+        }
+        PATTERN_DECISIONS.append(record)
+        item["applied_decision"] = record
+
+        log_event(
+            node_id=item["pattern_id"],
+            action_type="learning_auto_decision_approved",
+            reviewer=body.reviewer,
+            notes=body.comment,
+            payload=record,
+        )
+    else:
+        log_event(
+            node_id=item["pattern_id"],
+            action_type="learning_auto_decision_rejected",
+            reviewer=body.reviewer,
+            notes=body.comment,
+            payload=item,
+        )
+
+    return {"ok": True, "item": item}
+

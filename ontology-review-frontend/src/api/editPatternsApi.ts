@@ -467,3 +467,107 @@ export async function rerunNode(
   if (!res.ok) throw new Error(`Failed to re-run node: ${await res.text()}`);
   return res.json();
 }
+
+
+// ---------------------------------------------------------------------------
+// Active learning / learned auto-review
+// ---------------------------------------------------------------------------
+
+export interface LearningModelSummary {
+  trained_at?: string | null;
+  examples: number;
+  rule_count: number;
+  global_majority?: "approve" | "alter" | "reject";
+  decision_counts?: Partial<Record<"approve" | "alter" | "reject", number>>;
+}
+
+export interface LearnedPrediction {
+  decision: "approve" | "alter" | "reject";
+  confidence: number;
+  source: "learned_rule" | "heuristic";
+  reason: string;
+  support: number;
+  signature?: string;
+}
+
+export interface AutoReviewItem {
+  id: string;
+  pattern_id: string;
+  suggestion: PatternSuggestion;
+  prediction: LearnedPrediction;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  comment?: string;
+  applied_decision?: FinishedChange;
+}
+
+export async function getLearningStatus(): Promise<{
+  model: LearningModelSummary;
+  auto_review_count: number;
+}> {
+  const res = await fetch(`${API_BASE}/learning/status`);
+  if (!res.ok) throw new Error(`Failed to load learning status: ${await res.text()}`);
+  return res.json();
+}
+
+export async function trainLearningModel(body: {
+  reviewer: string;
+  is_admin?: boolean;
+}): Promise<{ ok: boolean; model: LearningModelSummary }> {
+  const res = await fetch(`${API_BASE}/learning/train`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to train learning model: ${await res.text()}`);
+  return res.json();
+}
+
+export async function predictSuggestionDecision(
+  suggestion: PatternSuggestion
+): Promise<{ prediction: LearnedPrediction }> {
+  const res = await fetch(`${API_BASE}/learning/predict`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ suggestion }),
+  });
+  if (!res.ok) throw new Error(`Failed to predict suggestion decision: ${await res.text()}`);
+  return res.json();
+}
+
+export async function getAutoReviewItems(options: {
+  category?: PatternType | "all";
+  threshold?: number;
+  limit?: number;
+} = {}): Promise<{ items: AutoReviewItem[]; threshold: number; count: number }> {
+  const params = new URLSearchParams({
+    category: options.category ?? "all",
+    threshold: String(options.threshold ?? 0.85),
+    limit: String(options.limit ?? 50),
+  });
+
+  const res = await fetch(`${API_BASE}/learning/auto-review?${params.toString()}`);
+  if (!res.ok) throw new Error(`Failed to load learned auto-review items: ${await res.text()}`);
+  return res.json();
+}
+
+export async function decideAutoReviewItem(
+  itemId: string,
+  body: {
+    reviewer: string;
+    approve: boolean;
+    is_admin?: boolean;
+    comment?: string;
+  }
+): Promise<{ ok: boolean; item: AutoReviewItem }> {
+  const res = await fetch(`${API_BASE}/learning/auto-review/${encodeURIComponent(itemId)}/decision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to decide learned auto-review item: ${await res.text()}`);
+  return res.json();
+}
+
