@@ -512,6 +512,24 @@ export async function getLearningStatus(): Promise<{
   return res.json();
 }
 
+export interface LearnedRule {
+  signature: string;
+  decision: "approve" | "alter" | "reject";
+  confidence: number;
+  support: number;
+  counts: Partial<Record<"approve" | "alter" | "reject", number>>;
+}
+
+export async function getLearnedRules(): Promise<{
+  trained_at: string | null;
+  rule_count: number;
+  rules: LearnedRule[];
+}> {
+  const res = await fetch(`${API_BASE}/learning/rules`);
+  if (!res.ok) throw new Error(`Failed to load learned rules: ${await res.text()}`);
+  return res.json();
+}
+
 export async function trainLearningModel(body: {
   reviewer: string;
   is_admin?: boolean;

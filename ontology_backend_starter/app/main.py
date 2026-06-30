@@ -1598,6 +1598,34 @@ def learning_status():
     }
 
 
+@app.get("/learning/rules")
+def learning_rules():
+    """Return the full learned rule table for transparency / auditing.
+
+    Each rule shows the signature it matches, the decision it predicts, the
+    confidence (agreement among human decisions), how many human decisions
+    support it, and the raw approve/alter/reject vote counts. This is the
+    interpretable record of what the system learned from people.
+    """
+    if LEARNING_MODEL.get("trained_at") is None:
+        _train_learning_model()
+    rules = LEARNING_MODEL.get("rules") or {}
+    return {
+        "trained_at": LEARNING_MODEL.get("trained_at"),
+        "rule_count": len(rules),
+        "rules": [
+            {
+                "signature": sig,
+                "decision": r.get("decision"),
+                "confidence": r.get("confidence"),
+                "support": r.get("support"),
+                "counts": r.get("counts"),
+            }
+            for sig, r in sorted(rules.items(), key=lambda kv: -kv[1].get("support", 0))
+        ],
+    }
+
+
 @app.post("/learning/train")
 def train_learning_model(body: LearningTrainRequest):
     """Train/retrain from human pattern decisions."""

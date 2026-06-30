@@ -25,10 +25,12 @@ import {
   resolveConflict,
   rerunNode,
   getLearningStatus,
+  getLearnedRules,
   trainLearningModel,
   getAutoReviewItems,
   decideAutoReviewItem,
   type AutoReviewItem,
+  type LearnedRule,
   type CollaborationConflict,
   type LearningModelSummary,
   type FinishedChange,
@@ -873,6 +875,53 @@ function SuggestionCard({
 }
 
 
+function describeRule(rule: LearnedRule): string {
+  const [patternType, action, confidenceBucket, nodeBucket] = rule.signature.split("|");
+
+  const conf =
+    confidenceBucket === "high"
+      ? "high-confidence"
+      : confidenceBucket === "medium"
+      ? "medium-confidence"
+      : "low-confidence";
+
+  const size =
+    nodeBucket === "single"
+      ? "a single node"
+      : nodeBucket === "few"
+      ? "a few nodes"
+      : "many nodes";
+
+  const verb =
+    rule.decision === "approve"
+      ? "approve the"
+      : rule.decision === "reject"
+      ? "reject the"
+      : "alter the";
+
+  return `When a ${conf} ${patternType} suggests "${action}" on ${size} → ${verb} ${action}.`;
+}
+
+function explainRule(rule: LearnedRule): string {
+  const counts = rule.counts ?? {};
+  const total = rule.support;
+  const winning = counts[rule.decision] ?? 0;
+  const pct = Math.round(rule.confidence * 100);
+
+  const breakdown = Object.entries(counts)
+    .map(([decision, n]) => `${n} ${decision}`)
+    .join(", ");
+
+  const agreement =
+    pct === 100
+      ? `all ${total} of those decisions agreed`
+      : `${winning} of ${total} agreed (${breakdown})`;
+
+  return `Learned because across ${total} matching human decision${
+    total === 1 ? "" : "s"
+  }, ${agreement} on "${rule.decision}". The system now applies this automatically to new suggestions with the same profile, while anything outside this profile still goes to a human.`;
+}
+
 function LearnedSuggestionsPanel({
   currentUser,
   isAdmin,
@@ -886,6 +935,7 @@ function LearnedSuggestionsPanel({
 }) {
   const [model, setModel] = useState<LearningModelSummary | null>(null);
   const [items, setItems] = useState<AutoReviewItem[]>([]);
+  const [rules, setRules] = useState<LearnedRule[]>([]);
   const [threshold, setThreshold] = useState(0.85);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
@@ -894,17 +944,19 @@ function LearnedSuggestionsPanel({
     setLoading(true);
     setStatus("");
     try {
-      const [modelData, reviewData] = await Promise.all([
+      const [modelData, reviewData, rulesData] = await Promise.all([
         getLearningStatus(),
         getAutoReviewItems({
           category: activeCategory,
           threshold,
           limit: 50,
         }),
+        getLearnedRules(),
       ]);
 
       setModel(modelData.model);
       setItems(reviewData.items ?? []);
+      setRules(rulesData.rules ?? []);
     } catch (err) {
       console.error(err);
       setStatus("Could not load learned suggestions.");
@@ -927,12 +979,16 @@ function LearnedSuggestionsPanel({
         is_admin: isAdmin,
       });
       setModel(data.model);
-      const reviewData = await getAutoReviewItems({
-        category: activeCategory,
-        threshold,
-        limit: 50,
-      });
+      const [reviewData, rulesData] = await Promise.all([
+        getAutoReviewItems({
+          category: activeCategory,
+          threshold,
+          limit: 50,
+        }),
+        getLearnedRules(),
+      ]);
       setItems(reviewData.items ?? []);
+      setRules(rulesData.rules ?? []);
       setStatus("Learning model retrained from human decisions.");
     } catch (err) {
       console.error(err);
@@ -1026,6 +1082,48 @@ function LearnedSuggestionsPanel({
           </div>
         </div>
       </div>
+
+      {rules.length > 0 && (
+        <div className="mt-4 border border-gray-200 rounded-xl bg-white p-4">
+          <h4 className="text-sm font-semibold text-gray-900">
+            Rules the system learned from your decisions
+          </h4>
+          <p className="text-xs text-gray-500 mt-1">
+            Each rule is summarized from prior human decisions and applied automatically to matching suggestions.
+          </p>
+          <div className="mt-3 space-y-2">
+            {rules.map((rule) => (
+              <div
+                key={rule.signature}
+                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5"
+              >
+                <p className="text-sm text-gray-800">
+                  {describeRule(rule)}
+                </p>
+                <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
+                  {explainRule(rule)}
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                  <span className="px-1.5 py-0.5 rounded bg-white border border-gray-200 font-mono">
+                    {rule.signature}
+                  </span>
+                  <span>{Math.round(rule.confidence * 100)}% agreement</span>
+                  <span>·</span>
+                  <span>{rule.support} human decision{rule.support === 1 ? "" : "s"}</span>
+                  {rule.counts && (
+                    <span>
+                      ·{" "}
+                      {Object.entries(rule.counts)
+                        .map(([k, v]) => `${v} ${k}`)
+                        .join(", ")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!isAdmin && (
         <p className="mt-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
