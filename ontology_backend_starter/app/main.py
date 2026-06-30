@@ -51,6 +51,12 @@ app.add_middleware(
 )
 
 
+@app.on_event("startup")
+def _startup_prime() -> None:
+    """Warm in-memory state from Supabase so learning persists across restarts."""
+    prime_pattern_decisions()
+
+
 # In-memory MVP stores. These are safe for prototyping.
 # Later: move these to SQLite/Postgres.
 AI_SUGGESTION_STORE: Dict[str, List[Dict[str, Any]]] = {}
@@ -118,6 +124,47 @@ def log_event(
         except Exception as e:
             print(f"[main] Could not write action log: {e}")
     return event
+
+
+def _persist_pattern_decision(record: Dict[str, Any]) -> None:
+    """Append a pattern decision to the in-memory list AND persist it to
+    Supabase (mirrors how log_event persists action_log). This is what lets
+    the learning model keep its training data across backend restarts."""
+    PATTERN_DECISIONS.append(record)
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("pattern_decisions").upsert({
+                "id": record["id"],
+                "pattern_id": record["pattern_id"],
+                "decision": record["decision"],
+                "reviewer": record.get("reviewer"),
+                "comment": record.get("comment"),
+                "altered_action": record.get("altered_action"),
+                "payload": record.get("payload") or {},
+                "created_at": record.get("created_at"),
+            }).execute()
+        except Exception as e:
+            print(f"[main] could not persist pattern decision: {e}")
+
+
+def prime_pattern_decisions(force: bool = False) -> None:
+    """Load all pattern_decisions from Supabase into memory in ONE query at
+    startup, so the learning model trains across restarts instead of from
+    scratch. Same single-query pattern as ai_scoring.prime_cache."""
+    if PATTERN_DECISIONS and not force:
+        return
+    sb = _get_supabase()
+    if sb is None:
+        return
+    try:
+        rows = sb.table("pattern_decisions").select("*").order("created_at").execute()
+        PATTERN_DECISIONS.clear()
+        for row in rows.data:
+            PATTERN_DECISIONS.append(row)
+        print(f"[main] primed {len(rows.data)} pattern decisions")
+    except Exception as e:
+        print(f"[main] prime_pattern_decisions failed: {e}")
 
 
 def flatten_tree(nodes, parent_path=None) -> List[Dict[str, Any]]:
@@ -1135,7 +1182,7 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
         "payload": body.payload or {},
         "created_at": now_iso(),
     }
-    PATTERN_DECISIONS.append(record)
+    _persist_pattern_decision(record)
 
     conflict = recompute_conflict(pattern_id)
     if conflict:
@@ -1377,18 +1424,33 @@ def _train_learning_model() -> Dict[str, Any]:
     decision_counts: Dict[str, int] = {}
     rule_counts: Dict[str, Dict[str, int]] = {}
 
+    # Look up the REAL current suggestion (true confidence + nodes) by pattern_id,
+    # so the signature we learn matches the signature we later predict with.
+    # Stored payloads only carry pattern_type/suggested_action/title, so without
+    # this the learned signature defaults to medium/single and never matches the
+    # real high/few suggestions -> learned rules silently never fire.
+    real_by_id: Dict[str, Dict[str, Any]] = {
+        s.get("id"): s for s in _all_current_suggestions("all")
+    }
+
     for row in PATTERN_DECISIONS:
         decision = row.get("decision")
         if decision not in {"approve", "alter", "reject"}:
             continue
 
         payload = row.get("payload") or {}
+        pattern_id = row.get("pattern_id", "")
+        real = real_by_id.get(pattern_id, {})
         suggestion = {
-            "id": row.get("pattern_id"),
-            "pattern_type": payload.get("pattern_type", row.get("pattern_id", "").split("::")[0]),
-            "suggested_action": payload.get("suggested_action", row.get("altered_action", "")),
-            "confidence": payload.get("confidence", 0.75),
-            "nodes": payload.get("nodes", []),
+            "id": pattern_id,
+            "pattern_type": payload.get("pattern_type")
+                or real.get("pattern_type")
+                or pattern_id.split("::")[0],
+            "suggested_action": payload.get("suggested_action")
+                or real.get("suggested_action")
+                or row.get("altered_action", ""),
+            "confidence": real.get("confidence", payload.get("confidence", 0.75)),
+            "nodes": real.get("nodes", payload.get("nodes", [])),
         }
         signature = _suggestion_signature(suggestion)
 
@@ -1491,13 +1553,30 @@ def _predict_suggestion_decision(suggestion: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _all_current_suggestions(category: str = "all") -> List[Dict[str, Any]]:
+    """Collect suggestions for the learning layer WITHOUT triggering OpenAI.
+
+    Forces SKIP_LLM so any cache-miss node falls back to rule-based scoring
+    instead of calling the API. This prevents the full-scan LLM storm that
+    crashed the free-tier Supabase: clicking the "Learned" tab can now never
+    fan out into hundreds of OpenAI calls.
+    """
     keys = list(PATTERN_CATEGORY_META.keys()) if category == "all" else [category]
     suggestions: List[Dict[str, Any]] = []
 
-    for key in keys:
-        detected = _detect_category_patterns(key)
-        for suggestion in detected.get("suggestions", []):
-            suggestions.append(suggestion)
+    import os
+    old_skip = os.environ.get("SKIP_LLM")
+    os.environ["SKIP_LLM"] = "true"   # learning is pure statistics, never calls OpenAI
+    try:
+        for key in keys:
+            detected = _detect_category_patterns(key)
+            for suggestion in detected.get("suggestions", []):
+                suggestions.append(suggestion)
+    finally:
+        # restore the previous value so normal scoring elsewhere is unaffected
+        if old_skip is None:
+            os.environ.pop("SKIP_LLM", None)
+        else:
+            os.environ["SKIP_LLM"] = old_skip
 
     return suggestions
 
@@ -1624,7 +1703,7 @@ def decide_learning_auto_review(item_id: str, body: AutoReviewDecisionRequest):
             },
             "created_at": now_iso(),
         }
-        PATTERN_DECISIONS.append(record)
+        _persist_pattern_decision(record)
         item["applied_decision"] = record
 
         log_event(
