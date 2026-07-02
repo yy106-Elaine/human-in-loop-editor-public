@@ -148,8 +148,16 @@ export function EditPatternsPage({
   ) {
     const existing = categories.find((c) => c.key === key);
     const offset = opts.append ? existing?.suggestions.length ?? 0 : 0;
+
+    // Append = load one more page. Non-append refresh = reload the WHOLE
+    // category in one shot (data is cached server-side, no LLM calls), so
+    // filtering out decided items never leaves a near-empty list that forces
+    // repeated "Load more" clicks after each decision.
+    const total = existing?.count ?? PAGE_SIZE;
+    const limit = opts.append ? PAGE_SIZE : Math.max(total, PAGE_SIZE);
+
     const page = await getPatternCategoryPage(key, {
-      limit: PAGE_SIZE,
+      limit,
       offset,
       q: opts.q ?? query,
     });
@@ -179,16 +187,18 @@ export function EditPatternsPage({
 
       setActiveKey(preferred);
 
-      // Load only the first active category page. This avoids pulling every card at once.
+      // Load the whole active category up front (cached server-side, no LLM),
+      // so filtering decided items doesn't leave gaps.
       if (preferred !== ALL_KEY) {
-        const firstPage = await getPatternCategoryPage(preferred as PatternType, {
-          limit: PAGE_SIZE,
+        const summary = summaries.find((c: PatternCategorySummary) => c.key === preferred);
+        const fullPage = await getPatternCategoryPage(preferred as PatternType, {
+          limit: Math.max(summary?.count ?? PAGE_SIZE, PAGE_SIZE),
           offset: 0,
         });
 
         setCategories((prev) =>
           prev.map((category) =>
-            category.key === preferred ? firstPage : category
+            category.key === preferred ? fullPage : category
           )
         );
       }
@@ -299,11 +309,33 @@ export function EditPatternsPage({
     return activeCategory?.suggestions ?? [];
   }, [isAll, categories, activeCategory]);
 
+  // Set of pattern_ids that already have a human/AI decision.
+  const decidedIds = useMemo(
+    () => new Set(decisions.map((d) => d.pattern_id)),
+    [decisions]
+  );
+
+  // Unfinished view should hide anything already decided.
+  const displayedSuggestions = useMemo(() => {
+    if (statusFilter === "unfinished") {
+      return visibleSuggestions.filter((s) => !decidedIds.has(s.id));
+    }
+    return visibleSuggestions;
+  }, [statusFilter, visibleSuggestions, decidedIds]);
+
   const totalCount = isAll
     ? categories.reduce((sum, c) => sum + (c.count ?? c.suggestions.length), 0)
     : activeCategory?.count ?? activeCategory?.suggestions.length ?? 0;
 
   const hasMore = !isAll && Boolean(activeCategory?.has_more);
+
+  // Unfinished = suggestions actually loaded that have no decision yet.
+  // (Matches the filtered list exactly, so the tab count and the list agree.)
+  const unfinishedCount = visibleSuggestions.filter(
+    (s) => !decidedIds.has(s.id)
+  ).length;
+  // Finished = the rest of this category's total.
+  const finishedCount = Math.max(totalCount - unfinishedCount, 0);
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gray-50">
@@ -381,8 +413,8 @@ export function EditPatternsPage({
           <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 shrink-0">
             {([
               ["all", "All"],
-              ["unfinished", "Unfinished"],
-              ["finished", "Finished"],
+              ["unfinished", `Unfinished${unfinishedCount ? ` (${unfinishedCount})` : ""}`],
+              ["finished", `Finished${finishedCount ? ` (${finishedCount})` : ""}`],
               ["conflicts", `Conflicts${openConflicts.length ? ` (${openConflicts.length})` : ""}`],
               ["learned", "Learned"],
             ] as const).map(([key, label]) => (
@@ -484,23 +516,26 @@ export function EditPatternsPage({
                         : activeCategory!.description}
                     </p>
                     <p className="text-xs text-gray-400 mt-1">
-                      Loaded {visibleSuggestions.length} of {totalCount} suggestion{totalCount === 1 ? "" : "s"}.
+                      Showing {displayedSuggestions.length}
+                      {statusFilter === "unfinished" ? " unfinished" : ""} of {totalCount} suggestion{totalCount === 1 ? "" : "s"}.
                     </p>
                   </div>
                 )}
 
                 {statusFilter !== "finished" && (
                   <div className="space-y-4">
-                    {pageLoading && visibleSuggestions.length === 0 ? (
+                    {pageLoading && displayedSuggestions.length === 0 ? (
                       <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
                         Loading suggestions...
                       </div>
-                    ) : visibleSuggestions.length === 0 ? (
+                    ) : displayedSuggestions.length === 0 ? (
                       <div className="bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
-                        No suggestions loaded for this category.
+                        {statusFilter === "unfinished"
+                          ? "All suggestions in this category have been decided."
+                          : "No suggestions loaded for this category."}
                       </div>
                     ) : (
-                      visibleSuggestions.map((suggestion) => (
+                      displayedSuggestions.map((suggestion) => (
                         <SuggestionCard
                           key={suggestion.id}
                           suggestion={suggestion}
@@ -1319,12 +1354,33 @@ function FinishedChangeRow({ change }: { change: FinishedChange }) {
     ? new Date(change.created_at).toLocaleString()
     : "";
 
+  // A decision is AI-learned if it came through the auto-review approval path,
+  // which stamps learning_prediction / auto_review_id into the payload.
+  const isLearned =
+    Boolean(change.payload?.learning_prediction) ||
+    Boolean(change.payload?.auto_review_id);
+
   return (
-    <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+    <div
+      className={`border rounded-lg px-4 py-3 flex items-center justify-between gap-3 ${
+        isLearned ? "bg-indigo-50/60 border-indigo-200" : "bg-white border-gray-200"
+      }`}
+    >
       <div className="min-w-0">
-        <p className="text-sm font-medium text-gray-900 truncate">{title}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-gray-900 truncate">{title}</p>
+          <span
+            className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
+              isLearned
+                ? "bg-indigo-100 text-indigo-700"
+                : "bg-gray-100 text-gray-600"
+            }`}
+          >
+            {isLearned ? "AI learned" : "Human"}
+          </span>
+        </div>
         <p className="text-xs text-gray-500 mt-0.5">
-          {change.reviewer}
+          {isLearned ? `Learning System · approved by ${change.reviewer}` : change.reviewer}
           {when && ` · ${when}`}
           {change.altered_action && ` · → ${change.altered_action}`}
         </p>
