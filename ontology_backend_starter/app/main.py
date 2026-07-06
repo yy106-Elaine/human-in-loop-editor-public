@@ -1790,3 +1790,68 @@ def decide_learning_auto_review(item_id: str, body: AutoReviewDecisionRequest):
 
     return {"ok": True, "item": item}
 
+# ---------------------------------------------------------------------------
+# Admin / study reset
+# ---------------------------------------------------------------------------
+
+class ResetRequest(BaseModel):
+    scope: str = "study"          # "log" = clear the activity feed only; "study" = full reset
+    is_admin: Optional[bool] = False
+    reviewer: Optional[str] = "Facilitator"
+
+
+def _reset_tree_statuses(nodes) -> None:
+    """Recursively set every node's status back to none (clears tree coloring)."""
+    for n in nodes:
+        n.status = NodeStatus.none
+        _reset_tree_statuses(n.children or [])
+
+
+@app.post("/admin/reset")
+def admin_reset(body: ResetRequest):
+    """Clear accumulated review state so the next study session starts clean."""
+    if not body.is_admin:
+        raise HTTPException(status_code=403, detail="Only a facilitator/admin can reset study state")
+
+    sb = _get_supabase()
+
+    # 1. Activity log — always cleared (in-memory + Supabase).
+    ACTION_LOG.clear()
+    if sb:
+        try:
+            sb.table("action_log").delete().neq("node_id", "__never__").execute()
+        except Exception as e:
+            print(f"[main] could not clear action_log: {e}")
+
+    if body.scope == "log":
+        return {"ok": True, "scope": "log", "message": "Activity log cleared."}
+
+    # 2. Full reset — in-memory stores.
+    PATTERN_DECISIONS.clear()
+    CONFLICTS.clear()
+    AI_SUGGESTION_STORE.clear()
+    AUTO_REVIEW_ITEMS.clear()
+    _CACHE.clear()                          # cached AI scores
+    _reset_tree_statuses(ONTOLOGY_TREE)     # node colors back to none
+
+    LEARNING_MODEL.update({
+        "trained_at": None, "examples": 0, "rules": {},
+        "global_majority": "approve", "decision_counts": {},
+    })
+
+    # Keep the 2 seeded principles, drop the human-added ones.
+    seeded = [p for p in PRINCIPLES if p.get("source") == "initial"]
+    PRINCIPLES.clear()
+    PRINCIPLES.extend(seeded)
+
+    # 3. Full reset — Supabase tables that get primed back on restart.
+    if sb:
+        for table, col in (("pattern_decisions", "id"),
+                           ("node_status", "node_id"),
+                           ("ai_scores", "cache_key")):
+            try:
+                sb.table(table).delete().neq(col, "__never__").execute()
+            except Exception as e:
+                print(f"[main] could not clear {table}: {e}")
+
+    return {"ok": True, "scope": "study", "message": "Full study state reset."}
