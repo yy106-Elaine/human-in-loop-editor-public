@@ -13,4 +13,7 @@ __pycache__/
 
 # Secrets
 .env
-ontology_backend_starter/.env
+ontology_backend_starter/.env.venv/
+**/__pycache__/
+node_modules/
+.env
