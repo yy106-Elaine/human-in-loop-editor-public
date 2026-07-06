@@ -58,6 +58,10 @@ def _parse_llm_json(raw: str) -> Optional[Dict[str, Any]]:
         conf = 0.5
     data["confidence"] = max(0.0, min(1.0, conf))
     data["rationale"] = str(data.get("rationale", "")).strip()
+    # Preserve structured action parameters (merge_into / new_label /
+    # target_parent / additional_parent ...) so suggestions are executable.
+    params = data.get("action_params")
+    data["action_params"] = params if isinstance(params, dict) else {}
     return data
 
 

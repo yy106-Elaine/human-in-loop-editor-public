@@ -29,6 +29,7 @@ import {
   trainLearningModel,
   getAutoReviewItems,
   decideAutoReviewItem,
+  undoEditPatternDecision,
   type AutoReviewItem,
   type LearnedRule,
   type CollaborationConflict,
@@ -74,6 +75,56 @@ const PATTERN_COLORS: Record<string, { card: string; bar: string; actionText: st
 };
 
 const DEFAULT_COLOR = { card: "bg-white border-gray-200", bar: "bg-gray-300", actionText: "text-gray-800" };
+
+// Color by ACTION (what the AI recommends), independent of category.
+function actionColor(action?: string): string {
+  switch ((action || "").toLowerCase()) {
+    case "merge":
+      return "text-blue-700";
+    case "rename":
+    case "relabel":
+      return "text-amber-700";
+    case "accept":
+    case "keep":
+    case "keep_separate":
+      return "text-emerald-700";
+    case "delete":
+    case "remove":
+      return "text-red-700";
+    case "place_elsewhere":
+    case "add_parent":
+      return "text-violet-700";
+    default:
+      return "text-gray-700";
+  }
+}
+
+// Turn action_params into a readable phrase instead of raw JSON.
+function describeActionParams(params: unknown): string | null {
+  if (!params || typeof params !== "object") return null;
+  const p = params as Record<string, unknown>;
+  if (Array.isArray(p.renames) && p.renames.length > 0) {
+    return p.renames
+      .map((r) => {
+        const o = r as Record<string, unknown>;
+        return `${o.node_id} → "${o.new_label}"`;
+      })
+      .join(", ");
+  }
+  if (typeof p.new_label === "string" && p.new_label) {
+    return `→ "${p.new_label}"`;
+  }
+  if (typeof p.merge_into === "string" && p.merge_into) {
+    return `merge into ${p.merge_into}`;
+  }
+  if (typeof p.target_parent === "string" && p.target_parent) {
+    return `move under ${p.target_parent}`;
+  }
+  if (typeof p.additional_parent === "string" && p.additional_parent) {
+    return `also under ${p.additional_parent}`;
+  }
+  return null;
+}
 
 type StatusFilter = "all" | "unfinished" | "finished" | "conflicts" | "learned";
 
@@ -329,13 +380,35 @@ export function EditPatternsPage({
 
   const hasMore = !isAll && Boolean(activeCategory?.has_more);
 
+  // Decisions that belong to the CURRENT category (or all categories).
+  // pattern_id looks like "duplicate::auction", so the prefix is the category.
+  const categoryDecisions = isAll
+    ? decisions
+    : decisions.filter((d) => {
+        const cat = (d.pattern_id.split("::")[0] || "").toLowerCase();
+        return cat === activeKey;
+      });
+
+  // A pattern can have several historical decisions (re-decided over time).
+  // Keep only the latest per pattern_id so Finished shows each item once.
+  const relevantDecisions = useMemo(() => {
+    const latestByPattern = new Map<string, FinishedChange>();
+    for (const d of categoryDecisions) {
+      const existing = latestByPattern.get(d.pattern_id);
+      if (!existing || new Date(d.created_at) > new Date(existing.created_at)) {
+        latestByPattern.set(d.pattern_id, d);
+      }
+    }
+    return Array.from(latestByPattern.values());
+  }, [categoryDecisions]);
+
   // Unfinished = suggestions actually loaded that have no decision yet.
   // (Matches the filtered list exactly, so the tab count and the list agree.)
   const unfinishedCount = visibleSuggestions.filter(
     (s) => !decidedIds.has(s.id)
   ).length;
-  // Finished = the rest of this category's total.
-  const finishedCount = Math.max(totalCount - unfinishedCount, 0);
+  // Finished = decisions in this category.
+  const finishedCount = relevantDecisions.length;
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gray-50">
@@ -572,14 +645,18 @@ export function EditPatternsPage({
                       Decisions already made on the suggestions above.
                     </p>
 
-                    {decisions.length === 0 ? (
+                    {relevantDecisions.length === 0 ? (
                       <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
                         No finished changes yet.
                       </div>
                     ) : (
                       <div className="mt-4 space-y-2">
-                        {[...decisions].reverse().map((d) => (
-                          <FinishedChangeRow key={d.id} change={d} />
+                        {[...relevantDecisions].reverse().map((d) => (
+                          <FinishedChangeRow 
+                          key={d.id} 
+                          change={d} 
+                          onUndo={refreshCurrentView} 
+                          />
                         ))}
                       </div>
                     )}
@@ -643,6 +720,7 @@ function SuggestionCard({
         payload: {
           pattern_type: suggestion.pattern_type,
           suggested_action: suggestion.suggested_action,
+          action_params: suggestion.action_params ?? {},
           title: suggestion.title,
         },
       });
@@ -697,9 +775,15 @@ function SuggestionCard({
           </h4>
           <p className="text-sm text-gray-500 mt-1">
             Suggested action:{" "}
-            <span className={`font-semibold ${colors.actionText}`}>
+            <span className={`font-semibold ${actionColor(suggestion.suggested_action)}`}>
               {suggestion.suggested_action}
             </span>
+            {(() => {
+              const desc = describeActionParams(suggestion.action_params);
+              return desc ? (
+                <span className="text-gray-600">{" · "}{desc}</span>
+              ) : null;
+            })()}
           </p>
         </div>
 
@@ -1342,7 +1426,15 @@ function ConflictResolutionPanel({
   );
 }
 
-function FinishedChangeRow({ change }: { change: FinishedChange }) {
+function FinishedChangeRow({ 
+  change, 
+  onUndo 
+}: { 
+  change: FinishedChange;
+  onUndo?: () => Promise<void> | void;
+}) {
+  const [isUndoing, setIsUndoing] = useState(false);
+
   const decisionStyle: Record<string, string> = {
     approve: "bg-green-100 text-green-700",
     alter: "bg-amber-100 text-amber-700",
@@ -1354,11 +1446,37 @@ function FinishedChangeRow({ change }: { change: FinishedChange }) {
     ? new Date(change.created_at).toLocaleString()
     : "";
 
-  // A decision is AI-learned if it came through the auto-review approval path,
-  // which stamps learning_prediction / auto_review_id into the payload.
   const isLearned =
     Boolean(change.payload?.learning_prediction) ||
     Boolean(change.payload?.auto_review_id);
+
+  const aiAction =
+    (change.payload?.suggested_action as string | undefined) ?? null;
+
+  const aiParams = change.payload?.action_params as
+    | Record<string, unknown>
+    | undefined;
+    
+  const aiParamsText = describeActionParams(aiParams);
+
+  const humanAction =
+    change.decision === "approve"
+      ? aiAction
+      : change.altered_action || null;
+
+  async function handleUndo() {
+    if (!onUndo) return;
+    setIsUndoing(true);
+    try {
+      await undoEditPatternDecision(change.pattern_id);
+      await onUndo(); 
+    } catch (err) {
+      console.error("Undo failed:", err);
+      alert("Failed to undo. Check if the backend endpoint exists.");
+    } finally {
+      setIsUndoing(false);
+    }
+  }
 
   return (
     <div
@@ -1379,20 +1497,54 @@ function FinishedChangeRow({ change }: { change: FinishedChange }) {
             {isLearned ? "AI learned" : "Human"}
           </span>
         </div>
+        <p className="text-xs text-gray-600 mt-1">
+          {aiAction && (
+            <span>
+              AI suggested{" "}
+              <span className={`font-semibold ${actionColor(aiAction)}`}>
+                {aiAction}
+              </span>
+              {aiParamsText && (
+                <span className="text-gray-500"> {aiParamsText}</span>
+              )}
+            </span>
+          )}
+          {aiAction && " · "}
+          <span className="font-medium">{change.decision}</span>
+          {change.decision !== "approve" && humanAction && (
+            <span>
+              {" → "}
+              <span className={`font-semibold ${actionColor(humanAction)}`}>
+                {humanAction}
+              </span>
+            </span>
+          )}
+        </p>
         <p className="text-xs text-gray-500 mt-0.5">
           {isLearned ? `Learning System · approved by ${change.reviewer}` : change.reviewer}
           {when && ` · ${when}`}
-          {change.altered_action && ` · → ${change.altered_action}`}
         </p>
       </div>
 
-      <span
-        className={`shrink-0 text-xs font-medium px-2 py-1 rounded ${
-          decisionStyle[change.decision] ?? "bg-gray-100 text-gray-600"
-        }`}
-      >
-        {change.decision}
-      </span>
+      <div className="flex flex-col items-end gap-2 shrink-0">
+        <span
+          className={`text-xs font-medium px-2 py-1 rounded ${
+            decisionStyle[change.decision] ?? "bg-gray-100 text-gray-600"
+          }`}
+        >
+          {change.decision}
+        </span>
+        {onUndo && (
+          <button
+            onClick={handleUndo}
+            disabled={isUndoing}
+            className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-400 hover:text-gray-700 transition-colors disabled:opacity-50"
+          >
+            <RotateCcw size={11} />
+            {isUndoing ? "Undoing..." : "Undo"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

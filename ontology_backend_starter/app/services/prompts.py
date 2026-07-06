@@ -35,11 +35,30 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "when concepts are clearly the same but wording differs, and "
             "0.5-0.7 when it is a judgment call. Do NOT default everything to "
             "1.0.\n\n"
-            "Return STRICT JSON only, no markdown:\n"
+            "Return STRICT JSON only, no markdown, no comments.\n\n"
+            "The JSON MUST have these keys: suggested_action, action_params, "
+            "rationale, confidence.\n\n"
+            "action_params is a REQUIRED object; its contents depend on the action:\n"
+            "- If suggested_action is \"rename\": action_params MUST contain a "
+            "\"renames\" array, one object per node that needs a new label, each "
+            "with \"node_id\" and \"new_label\". new_label MUST be concrete and "
+            "disambiguated (e.g. \"tract (anatomy)\"), never empty.\n"
+            "- If suggested_action is \"merge\": action_params SHOULD contain "
+            "\"merge_into\" set to the node_id you would keep; if truly identical "
+            "use an empty object {}.\n\n"
+            "Example for rename:\n"
             "{\n"
-            '  "suggested_action": "merge" | "rename",\n'
-            '  "rationale": "1-2 sentence explanation grounded in the definitions",\n'
-            '  "confidence": 0.0 to 1.0\n'
+            '  "suggested_action": "rename",\n'
+            '  "action_params": {"renames": [{"node_id": "tract.n.02", "new_label": "tract (anatomy)"}, {"node_id": "tract.n.01", "new_label": "tract (land)"}]},\n'
+            '  "rationale": "Different senses of the word tract.",\n'
+            '  "confidence": 0.95\n'
+            "}\n\n"
+            "Example for merge:\n"
+            "{\n"
+            '  "suggested_action": "merge",\n'
+            '  "action_params": {"merge_into": "actor.n.01"},\n'
+            '  "rationale": "Both nodes have identical definitions.",\n'
+            '  "confidence": 1.0\n'
             "}"
         ),
         "user": (
@@ -61,9 +80,14 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Return STRICT JSON only, no markdown:\n"
             "{\n"
             '  "suggested_action": "accept" | "rename" | "delete",\n'
+            '  "action_params": {\n'
+            '    // for rename: "new_label": "<clearer label>"\n'
+            '    // for accept/delete: {}\n'
+            "  },\n"
             '  "rationale": "1-2 sentence explanation",\n'
             '  "confidence": 0.0 to 1.0\n'
-            "}"
+            "}\n"
+            "action_params.new_label is REQUIRED when suggested_action is rename."
         ),
         "user": (
             "## Candidate virtual node\n{candidate}\n\n"

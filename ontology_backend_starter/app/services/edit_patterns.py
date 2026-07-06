@@ -141,6 +141,7 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
                 "label": nodes[0].label,
                 "title": f"Duplicate label: {nodes[0].label}",
                 "suggested_action": scored["suggested_action"],
+                "action_params": scored.get("action_params", {}),
                 "rationale": scored["rationale"],
                 "confidence": scored["confidence"],
                 "nodes": [
@@ -229,6 +230,7 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
         "path": " → ".join(node.path),
         "children_count": node.children_count,
         "suggested_action": scored["suggested_action"],
+        "action_params": scored.get("action_params", {}),
         "title": f"Virtual node: {node.label}",
         "rationale": scored["rationale"],
         "confidence": scored["confidence"],

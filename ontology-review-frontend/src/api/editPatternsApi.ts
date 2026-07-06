@@ -1,4 +1,4 @@
-const API_BASE = "http://127.0.0.1:8000";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 export type PatternType =
   | "duplicate"
@@ -25,6 +25,7 @@ export interface PatternSuggestion {
   suggested_action: string;
   rationale: string;
   confidence: number;
+  action_params?: Record<string, unknown>;
   nodes?: PatternNode[];
   synsets?: string[];
   node_id?: string;
@@ -589,3 +590,16 @@ export async function decideAutoReviewItem(
   return res.json();
 }
 
+export async function undoEditPatternDecision(patternId: string) {
+  const res = await fetch(
+    `${API_BASE}/edit-patterns/${encodeURIComponent(patternId)}/decision`,
+    {
+      method: "DELETE",
+    }
+  );
+  
+  if (!res.ok) {
+    throw new Error(`Failed to undo decision: ${await res.text()}`);
+  }
+  return res.json();
+}

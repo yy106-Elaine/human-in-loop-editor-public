@@ -657,6 +657,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
                 "label": matches[0]["label"],
                 "title": f"Multiple inheritance candidate: {matches[0]['label']}",
                 "suggested_action": _inh_scored["suggested_action"],
+                "action_params": _inh_scored.get("action_params", {}),
                 "rationale": _inh_scored["rationale"],
                 "confidence": _inh_scored["confidence"],
                 "nodes": [
@@ -759,6 +760,7 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
                     "path": path_string,
                     "title": f"Possible misplaced node: {row['label']}",
                     "suggested_action": _mis_scored["suggested_action"],
+                    "action_params": _mis_scored.get("action_params", {}),
                     "rationale": _mis_scored["rationale"],
                     "confidence": _mis_scored["confidence"],
                     "nodes": [
@@ -846,6 +848,7 @@ def _detect_naming_patterns() -> Dict[str, Any]:
                 "path": row.get("path_string", ""),
                 "title": f"Naming review: {row['label']}",
                 "suggested_action": _nam_scored["suggested_action"],
+                "action_params": _nam_scored.get("action_params", {}),
                 "rationale": _nam_scored["rationale"],
                 "confidence": _nam_scored["confidence"],
                 "nodes": [
@@ -1228,6 +1231,41 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
         "record": record,
     }
 
+@app.delete("/edit-patterns/{pattern_id:path}/decision")
+def undo_edit_pattern_decision(pattern_id: str):
+    """
+    Undo a human decision on an edit-pattern suggestion.
+    Removes the decision from PATTERN_DECISIONS and unlinks from principles.
+    """
+    # 1. Find the corresponding decision record
+    decision_to_remove = next((d for d in PATTERN_DECISIONS if d.get("pattern_id") == pattern_id), None)
+    
+    if not decision_to_remove:
+        # If not found, it might have already been deleted. Return success anyway.
+        return {"ok": True, "message": "No decision found to undo."}
+
+    # 2. Remove the record from the list (modify in place to maintain reference)
+    if decision_to_remove in PATTERN_DECISIONS:
+        PATTERN_DECISIONS.remove(decision_to_remove)
+
+    # 3. Clean up potentially linked Principle examples (if it was previously linked)
+    for p in PRINCIPLES:
+        if pattern_id in p.get("examples", []):
+            p["examples"].remove(pattern_id)
+
+    # 4. Log the undo event
+    log_event(
+        node_id=pattern_id,
+        action_type="undo_edit_pattern_decision",
+        reviewer="System", # Or extract current user from request if available
+        notes="Undid previous decision",
+        payload={}
+    )
+
+    return {
+        "ok": True,
+        "message": f"Successfully undid decision for {pattern_id}."
+    }
 
 @app.get("/collaboration/conflicts")
 def collaboration_conflicts(status: Optional[str] = None):
