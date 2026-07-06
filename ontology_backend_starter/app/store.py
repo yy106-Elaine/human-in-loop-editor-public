@@ -28,7 +28,6 @@ def _get_supabase() -> SupabaseClient | None:
     key = os.getenv("SUPABASE_SERVICE_KEY")
     url = os.getenv("SUPABASE_URL")
     key = os.getenv("SUPABASE_SERVICE_KEY")
-    print(f"[debug] url={url!r} key_len={len(key) if key else None} key_tail={key[-6:] if key else None!r}")
     # TEMP diagnostic: verify what the deploy environment actually receives.
     # Prints length + head/tail only — never the full key.
     if key:
