@@ -1,5 +1,5 @@
 import { PromptEditor } from "./PromptEditor";
-import { useEffect, useMemo, useState, type LucideIcon } from "react";
+import { useEffect, useMemo, useState, type ReactNode, type LucideIcon } from "react";
 import {
   AlertTriangle,
   Check,
@@ -168,11 +168,17 @@ export function EditPatternsPage({
   currentUser,
   isAdmin = false,
   onCategoriesReloaded,
+  page,
+  setPage,
+  principlesView,
 }: {
   selectedNodeId?: string | null;
   currentUser: string;
   isAdmin?: boolean;
   onCategoriesReloaded?: () => void | Promise<void>;
+  page: "editor" | "principles";
+  setPage: (p: "editor" | "principles") => void;
+  principlesView: ReactNode;
 }) {
   const [categories, setCategories] = useState<PatternCategory[]>([]);
   const [activeKey, setActiveKey] = useState<PatternType | typeof ALL_KEY>("duplicate");
@@ -184,7 +190,14 @@ export function EditPatternsPage({
   const [decisions, setDecisions] = useState<FinishedChange[]>([]);
   const [conflicts, setConflicts] = useState<CollaborationConflict[]>([]);
   const [promptEditorFor, setPromptEditorFor] = useState<PatternType | null>(null);
-  
+  const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
+
+  useEffect(() => {
+    getPrinciples()
+      .then((data) => setPrinciples(data.principles ?? []))
+      .catch(() => setPrinciples([]));
+  }, []);
+
   async function loadSharedState() {
     const [decisionData, conflictData] = await Promise.all([
       getEditPatternDecisions(),
@@ -411,17 +424,59 @@ export function EditPatternsPage({
   // Finished = decisions in this category.
   const finishedCount = relevantDecisions.length;
 
+  const pageTabs = (
+    <div className="flex items-center gap-1 rounded-lg bg-gray-100 p-0.5 shrink-0">
+      <button
+        onClick={() => setPage("editor")}
+        className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+          page === "editor"
+            ? "bg-white text-gray-900 shadow-sm"
+            : "text-gray-600 hover:text-gray-900"
+        }`}
+      >
+        Editor
+      </button>
+      <button
+        onClick={() => setPage("principles")}
+        className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+          page === "principles"
+            ? "bg-white text-gray-900 shadow-sm"
+            : "text-gray-600 hover:text-gray-900"
+        }`}
+      >
+        Principles
+      </button>
+    </div>
+  );
+
+  if (page === "principles") {
+    return (
+      <div className="h-full flex flex-col overflow-hidden bg-gray-50">
+        <div className="shrink-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-gray-500">
+            Editing principles shared across the team.
+          </p>
+          {pageTabs}
+        </div>
+        <div className="flex-1 min-h-0 overflow-hidden">{principlesView}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full flex flex-col overflow-hidden bg-gray-50">
       <div className="shrink-0 bg-white border-b border-gray-200 px-6 py-4">
-        <p className="text-sm text-gray-500">
-          Select an edit type, review suggested cases, then accept, alter, or reject.
-          {selectedNodeId && (
-            <span className="ml-1 text-gray-400">
-              · Current tree node: {selectedNodeId}
-            </span>
-          )}
-        </p>
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm text-gray-500">
+            Select an edit type, review suggested cases, then accept, alter, or reject.
+            {selectedNodeId && (
+              <span className="ml-1 text-gray-400">
+                · Current tree node: {selectedNodeId}
+              </span>
+            )}
+          </p>
+          {pageTabs}
+        </div>
 
         <div className="mt-4 flex items-center gap-2 overflow-x-auto pb-1">
           {categories.map((category) => {
@@ -619,6 +674,7 @@ export function EditPatternsPage({
                             (c) => c.pattern_id === suggestion.id && c.status === "open"
                           )}
                           onDecision={refreshCurrentView}
+                          principles={principles}
                         />
                       ))
                     )}
@@ -685,12 +741,14 @@ function SuggestionCard({
   decisions,
   conflict,
   onDecision,
+  principles,
 }: {
   suggestion: PatternSuggestion;
   currentUser: string;
   decisions: FinishedChange[];
   conflict?: CollaborationConflict;
   onDecision: () => void | Promise<void>;
+  principles: PrincipleOption[];
 }) {
   const [mode, setMode] = useState<"approve" | "alter" | "reject" | null>(null);
   const [comment, setComment] = useState("");
@@ -698,16 +756,9 @@ function SuggestionCard({
   const [actionKind, setActionKind] = useState<string | null>(null);
   const [actionField, setActionField] = useState("");
   const [principleUpdate, setPrincipleUpdate] = useState("");
-  const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
   const [linkPrincipleId, setLinkPrincipleId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [rerunning, setRerunning] = useState(false);
-
-  useEffect(() => {
-    getPrinciples()
-      .then((data) => setPrinciples(data.principles ?? []))
-      .catch(() => setPrinciples([]));
-  }, []);
 
   async function submit(decision: "approve" | "alter" | "reject") {
     try {

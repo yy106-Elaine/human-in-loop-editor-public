@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { OntologyTree } from "./components/OntologyTree";
 import { EditPatternsPage } from "./components/EditPatternsPage";
+import { PrinciplesPage } from "./components/PrinciplesPage";
 import { LoginPage } from "./components/LoginPage";
 import { supabase } from "./lib/supabaseClient";
 import {
@@ -21,6 +22,7 @@ function getAdminEmails(): string[] {
 
 export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [page, setPage] = useState<"editor" | "principles">("editor");
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [errorHighlights, setErrorHighlights] = useState<ErrorHighlightMap>({});
@@ -132,6 +134,9 @@ export default function App() {
                 currentUser={currentEmail}
                 isAdmin={isAdmin}
                 onCategoriesReloaded={refreshTreeHighlights}
+                page={page}
+                setPage={setPage}
+                principlesView={<PrinciplesPage currentUser={currentEmail} />}
               />
             </div>
           </main>

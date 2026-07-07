@@ -1214,10 +1214,14 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
     )
 
     if body.principle_update and body.principle_update.strip():
+        _text = body.principle_update.strip()
+        # Use the first sentence (or first ~80 chars) as the title, full text as body.
+        _first = _text.split(".")[0].strip()
+        _title = _first if 0 < len(_first) <= 80 else (_text[:80].rstrip() + "…")
         principle = {
             "id": f"principle-{len(PRINCIPLES) + 1}",
-            "title": "Human-updated editing principle",
-            "body": body.principle_update.strip(),
+            "title": _title,
+            "body": _text,
             "source": "human_review",
             "examples": [pattern_id],
             "created_at": record["created_at"],
@@ -1341,12 +1345,17 @@ def add_principle(body: PatternDecisionRequest):
     if not text:
         raise HTTPException(status_code=400, detail="principle_update or comment is required")
 
+    _first = text.split(".")[0].strip()
+    _title = _first if 0 < len(_first) <= 80 else (text[:80].rstrip() + "…")
+    _examples = []
+    if body.payload and isinstance(body.payload, dict):
+        _examples = body.payload.get("examples", []) or []
     principle = {
         "id": f"principle-{len(PRINCIPLES) + 1}",
-        "title": "Human-added principle",
+        "title": _title,
         "body": text,
         "source": "manual",
-        "examples": [],
+        "examples": _examples,
         "created_at": now_iso(),
     }
     PRINCIPLES.append(principle)
