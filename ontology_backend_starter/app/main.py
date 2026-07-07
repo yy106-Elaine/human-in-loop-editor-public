@@ -1241,16 +1241,28 @@ def undo_edit_pattern_decision(pattern_id: str):
     Undo a human decision on an edit-pattern suggestion.
     Removes the decision from PATTERN_DECISIONS and unlinks from principles.
     """
-    # 1. Find the corresponding decision record
-    decision_to_remove = next((d for d in PATTERN_DECISIONS if d.get("pattern_id") == pattern_id), None)
-    
-    if not decision_to_remove:
-        # If not found, it might have already been deleted. Return success anyway.
+    # 1. Find ALL decision records for this pattern (a pattern can have several
+    #    historical decisions; undo should clear all of them in one click).
+    matching = [d for d in PATTERN_DECISIONS if d.get("pattern_id") == pattern_id]
+
+    if not matching:
+        # If none found, it might have already been deleted. Return success anyway.
         return {"ok": True, "message": "No decision found to undo."}
 
-    # 2. Remove the record from the list (modify in place to maintain reference)
-    if decision_to_remove in PATTERN_DECISIONS:
-        PATTERN_DECISIONS.remove(decision_to_remove)
+    # 2a. Remove every matching record from memory (modify in place to keep the reference).
+    PATTERN_DECISIONS[:] = [
+        d for d in PATTERN_DECISIONS if d.get("pattern_id") != pattern_id
+    ]
+    removed_count = len(matching)
+
+    # 2b. Also delete from Supabase so the undo survives a backend restart
+    #     (decisions are double-written: in-memory + pattern_decisions table).
+    sb = _get_supabase()
+    if sb:
+        try:
+            sb.table("pattern_decisions").delete().eq("pattern_id", pattern_id).execute()
+        except Exception as e:
+            print(f"[main] could not delete pattern decision(s) from Supabase: {e}")
 
     # 3. Clean up potentially linked Principle examples (if it was previously linked)
     for p in PRINCIPLES:
