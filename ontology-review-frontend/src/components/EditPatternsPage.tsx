@@ -171,6 +171,7 @@ export function EditPatternsPage({
   page,
   setPage,
   principlesView,
+  onFocusNode,
 }: {
   selectedNodeId?: string | null;
   currentUser: string;
@@ -179,6 +180,7 @@ export function EditPatternsPage({
   page: "editor" | "principles";
   setPage: (p: "editor" | "principles") => void;
   principlesView: ReactNode;
+  onFocusNode?: (nodeIds: string[]) => void;
 }) {
   const [categories, setCategories] = useState<PatternCategory[]>([]);
   const [activeKey, setActiveKey] = useState<PatternType | typeof ALL_KEY>("duplicate");
@@ -675,6 +677,7 @@ export function EditPatternsPage({
                           )}
                           onDecision={refreshCurrentView}
                           principles={principles}
+                          onFocusNode={onFocusNode}
                         />
                       ))
                     )}
@@ -742,6 +745,7 @@ function SuggestionCard({
   conflict,
   onDecision,
   principles,
+  onFocusNode,
 }: {
   suggestion: PatternSuggestion;
   currentUser: string;
@@ -749,6 +753,7 @@ function SuggestionCard({
   conflict?: CollaborationConflict;
   onDecision: () => void | Promise<void>;
   principles: PrincipleOption[];
+  onFocusNode?: (nodeIds: string[]) => void;
 }) {
   const [mode, setMode] = useState<"approve" | "alter" | "reject" | null>(null);
   const [comment, setComment] = useState("");
@@ -817,7 +822,13 @@ function SuggestionCard({
   const colors = PATTERN_COLORS[suggestion.pattern_type ?? ""] ?? DEFAULT_COLOR;
 
   return (
-    <div className={`relative overflow-hidden border rounded-xl shadow-sm p-4 pl-5 ${colors.card}`}>
+    <div
+      onClick={() => {
+        const ids = (suggestion.nodes ?? []).map((n) => n.id).filter(Boolean);
+        if (ids.length > 0) onFocusNode?.(ids);
+      }}
+      className={`relative overflow-hidden border rounded-xl shadow-sm p-4 pl-5 cursor-pointer ${colors.card}`}
+    >
       <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${colors.bar}`} />
 
       <div className="flex items-start justify-between gap-4">
@@ -892,7 +903,7 @@ function SuggestionCard({
         </div>
       )}
 
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex gap-2" onClick={(e) => e.stopPropagation()}>
         <button
           onClick={() => setMode("approve")}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700"
@@ -928,7 +939,7 @@ function SuggestionCard({
       </div>
 
       {mode && (
-        <div className="mt-4 border border-gray-200 rounded-lg p-3 bg-gray-50">
+        <div className="mt-4 border border-gray-200 rounded-lg p-3 bg-gray-50" onClick={(e) => e.stopPropagation()}>
           {mode === "alter" && (
             <div className="mb-3">
               <p className="text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-2">

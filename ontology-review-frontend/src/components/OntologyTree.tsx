@@ -66,7 +66,9 @@ interface TreeNodeProps {
   level: number;
   selectedId: string | null;
   onSelect: (node: OntologyNode, e: React.MouseEvent) => void;
-  expandedOverride: Set<string> | null;
+  expandedIds: Set<string>;
+  onToggle: (id: string) => void;
+  highlightIds: Set<string>;
   errorHighlights: Record<string, PatternType>;
 }
 
@@ -75,24 +77,27 @@ function TreeNode({
   level,
   selectedId,
   onSelect,
-  expandedOverride,
+  expandedIds,
+  onToggle,
+  highlightIds,
   errorHighlights,
 }: TreeNodeProps) {
-  const [isExpandedLocal, setIsExpandedLocal] = useState(level === 0);
   const hasChildren = !!node.children && node.children.length > 0;
-  const isExpanded = expandedOverride ? expandedOverride.has(node.id) : isExpandedLocal;
+  const isExpanded = expandedIds.has(node.id);
+  const isFocused = selectedId === node.id || highlightIds.has(node.id);
   const errorType = errorHighlights[node.id];
   const errorMeta = errorType ? ERROR_META[errorType] : null;
 
   return (
     <div>
       <div
-        className={`flex items-center gap-2 py-1.5 px-2 cursor-pointer hover:bg-gray-50 rounded border ${
-          selectedId === node.id
+        data-node-id={node.id}
+        className={`flex items-center gap-2 py-1.5 px-2 cursor-pointer rounded border ${
+          isFocused
             ? "bg-gray-900 text-white border-gray-900"
             : errorMeta
-              ? errorMeta.row
-              : "border-transparent"
+              ? `${errorMeta.row} hover:bg-gray-50`
+              : "border-transparent hover:bg-gray-50"
         }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
         onClick={(e) => onSelect(node, e)}
@@ -101,10 +106,10 @@ function TreeNode({
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (!expandedOverride) setIsExpandedLocal((v) => !v);
+            onToggle(node.id);
           }}
           className={`w-4 h-4 flex items-center justify-center ${
-            selectedId === node.id ? "text-white" : "text-gray-500"
+            isFocused ? "text-white" : "text-gray-500"
           }`}
         >
           {hasChildren ? (
@@ -119,18 +124,18 @@ function TreeNode({
             errorMeta ? errorMeta.dot : statusColors[node.status]
           }`}
         />
-        <span className={`text-sm truncate ${selectedId === node.id ? "text-white" : "text-gray-900"}`}>
+        <span className={`text-sm truncate ${isFocused ? "text-white" : "text-gray-900"}`}>
           {node.label}
         </span>
         {node.synset && (
-          <span className={`text-xs shrink-0 ${selectedId === node.id ? "text-gray-200" : "text-gray-500"}`}>
+          <span className={`text-xs shrink-0 ${isFocused ? "text-gray-200" : "text-gray-500"}`}>
             ({node.synset})
           </span>
         )}
         {errorType && (
           <span
             className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-              selectedId === node.id ? "bg-white/20 text-white" : "bg-white/70 text-gray-700"
+              isFocused ? "bg-white/20 text-white" : "bg-white/70 text-gray-700"
             }`}
           >
             {ERROR_META[errorType].label}
@@ -150,7 +155,9 @@ function TreeNode({
               level={level + 1}
               selectedId={selectedId}
               onSelect={onSelect}
-              expandedOverride={expandedOverride}
+              expandedIds={expandedIds}
+              onToggle={onToggle}
+              highlightIds={highlightIds}
               errorHighlights={errorHighlights}
             />
           ))}
@@ -204,11 +211,13 @@ export function OntologyTree({
   errorHighlights = {},
   activeErrorFilter,
   onErrorFilterChange,
+  focusNodeIds,
 }: {
   onNodeSelect: (id: string) => void;
   errorHighlights?: Record<string, PatternType>;
   activeErrorFilter?: PatternType | "all" | null;
   onErrorFilterChange?: (filter: PatternType | "all" | null) => void;
+  focusNodeIds?: string[];
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [popup, setPopup] = useState<{ synset?: string | null; label: string; x: number; y: number } | null>(null);
@@ -218,6 +227,17 @@ export function OntologyTree({
   const [subontologies, setSubontologies] = useState<{ id: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+ 
+  function toggleExpand(id: string) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const counts = useMemo(() => {
     const base: Record<PatternType, number> = {
@@ -288,7 +308,65 @@ export function OntologyTree({
     });
   };
 
+  // Focus a node (or group of nodes) when a review card is clicked: switch to
+  // the subontology, expand ancestor chains, highlight all related nodes, and
+  // scroll the first one into view.
+  useEffect(() => {
+    if (!focusNodeIds || focusNodeIds.length === 0 || Object.keys(ontology).length === 0) return;
+
+    const targets = new Set(focusNodeIds);
+    let foundSub: string | null = null;
+    const allAncestors = new Set<string>();
+
+    function dfs(node: OntologyNode, path: string[], sub: string) {
+      if (targets.has(node.id)) {
+        if (!foundSub) foundSub = sub;
+        for (const p of [...path, node.id]) allAncestors.add(p);
+      }
+      for (const c of node.children ?? []) {
+        dfs(c, [...path, node.id], sub);
+      }
+    }
+
+    for (const sub of Object.keys(ontology)) {
+      dfs(ontology[sub], [], sub);
+    }
+
+    if (!foundSub) return; // none of the target nodes are in the tree
+
+    setActive(foundSub);
+    setQuery("");
+    setExpandedIds((prev) => new Set([...prev, ...allAncestors]));
+    setHighlightIds(new Set(focusNodeIds));
+    setSelectedId(focusNodeIds[0]);
+
+    // Scroll the first target into view once it has rendered. Switching tab +
+    // expanding ancestors takes several frames, so poll briefly until the
+    // node's DOM element exists, then scroll to it.
+    let tries = 0;
+    const first = focusNodeIds[0];
+    const timer = setInterval(() => {
+      const el = document.querySelector(`[data-node-id="${first}"]`);
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        clearInterval(timer);
+      } else if (++tries > 20) {
+        clearInterval(timer);
+      }
+    }, 50);
+  }, [focusNodeIds, ontology]);
+
   const root = ontology[active];
+  // When switching subontology, default-expand its top-level nodes (level 0),
+  // without collapsing anything the user already opened.
+  useEffect(() => {
+    if (!root?.children) return;
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      for (const child of root.children!) next.add(child.id);
+      return next;
+    });
+  }, [root]);
   const { tree, expand } = useMemo(
     () => root
       ? filterTree(root, query, errorHighlights, activeErrorFilter ?? null)
@@ -343,7 +421,9 @@ export function OntologyTree({
               level={0}
               selectedId={selectedId}
               onSelect={handleSelect}
-              expandedOverride={filtering ? expand : null}
+              expandedIds={filtering ? expand : expandedIds}
+              onToggle={toggleExpand}
+              highlightIds={highlightIds}
               errorHighlights={errorHighlights}
             />
           ))

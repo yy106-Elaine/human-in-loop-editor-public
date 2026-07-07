@@ -22,6 +22,7 @@ function getAdminEmails(): string[] {
 
 export default function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [focusNodeIds, setFocusNodeIds] = useState<string[]>([]);
   const [page, setPage] = useState<"editor" | "principles">("editor");
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -124,6 +125,7 @@ export default function App() {
               errorHighlights={visibleHighlights}
               activeErrorFilter={activeTreeFilter}
               onErrorFilterChange={setActiveTreeFilter}
+              focusNodeIds={focusNodeIds}
             />
           </aside>
 
@@ -137,6 +139,7 @@ export default function App() {
                 page={page}
                 setPage={setPage}
                 principlesView={<PrinciplesPage currentUser={currentEmail} />}
+                onFocusNode={setFocusNodeIds}
               />
             </div>
           </main>
