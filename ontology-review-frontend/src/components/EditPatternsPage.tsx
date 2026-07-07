@@ -13,6 +13,7 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  Info,
   X,
 } from "lucide-react";
 import {
@@ -48,14 +49,14 @@ const ALTER_ACTIONS: {
   kind: string;
   label: string;
   icon: LucideIcon;
+  description?: string;
   requiredField?: { label: string; placeholder: string };
 }[] = [
-  { kind: "rename", label: "Rename", icon: Pencil, requiredField: { label: "New label", placeholder: "e.g. school_building" } },
-  { kind: "merge", label: "Merge", icon: GitMerge, requiredField: { label: "Target node ID", placeholder: "e.g. school.n.01" } },
-  { kind: "delete", label: "Delete", icon: Trash2 },
-  { kind: "add_parent", label: "Add Parent", icon: CornerUpRight, requiredField: { label: "Additional parent ID", placeholder: "e.g. building.n.01" } },
-  { kind: "place_elsewhere", label: "Place Elsewhere", icon: FolderInput, requiredField: { label: "New parent ID", placeholder: "e.g. structure.n.01" } },
-  { kind: "split", label: "Split", icon: GitBranch },
+  { kind: "rename", label: "Rename", icon: Pencil, description: "Keep the node but give it a clearer, disambiguated label.", requiredField: { label: "New label", placeholder: "e.g. school_building" } },
+  { kind: "merge", label: "Merge", icon: GitMerge, description: "Combine this node into another existing node (they are the same concept).", requiredField: { label: "Target node ID", placeholder: "e.g. school.n.01" } },
+  { kind: "delete", label: "Delete", icon: Trash2, description: "Remove this node from the ontology entirely." },
+  { kind: "add_parent", label: "Add Parent", icon: CornerUpRight, description: "Give this node an additional parent (it belongs under more than one).", requiredField: { label: "Additional parent ID", placeholder: "e.g. building.n.01" } },
+  { kind: "place_elsewhere", label: "Place Elsewhere", icon: FolderInput, description: "Move this node under a different parent (it is currently misplaced).", requiredField: { label: "New parent ID", placeholder: "e.g. structure.n.01" } },
 ];
 
 const ISSUE_META: Record<string, { icon: LucideIcon; active: string }> = {
@@ -902,7 +903,15 @@ function SuggestionCard({
                       }`}
                     >
                       <Icon size={14} />
-                      {opt.label}
+                      <span>{opt.label}</span>
+                      {opt.description && (
+                        <span className="ml-auto relative group/tip">
+                          <Info size={13} className="text-gray-400 group-hover/tip:text-gray-600" />
+                          <span className="pointer-events-none absolute right-0 bottom-full mb-1.5 z-20 w-56 rounded-md bg-gray-900 text-white text-xs font-normal leading-snug px-2.5 py-1.5 opacity-0 group-hover/tip:opacity-100 transition-opacity">
+                            {opt.description}
+                          </span>
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -979,12 +988,32 @@ function SuggestionCard({
             className="mt-2 w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400 resize-none"
           />
 
-          <button
-            onClick={() => submit(mode)}
-            className="mt-2 w-full px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800"
-          >
-            Save {mode} decision
-          </button>
+          {(() => {
+            // Enforce required fields on Alter: if the chosen action needs a
+            // value (rename -> new label, merge/add_parent/place_elsewhere -> ID)
+            // it must be filled before the decision can be saved.
+            const selectedAlter = ALTER_ACTIONS.find((a) => a.kind === actionKind);
+            const missingRequired =
+              mode === "alter" &&
+              Boolean(selectedAlter?.requiredField) &&
+              actionField.trim() === "";
+            return (
+              <>
+                <button
+                  onClick={() => submit(mode)}
+                  disabled={missingRequired}
+                  className="mt-2 w-full px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                >
+                  Save {mode} decision
+                </button>
+                {missingRequired && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    {selectedAlter?.requiredField?.label} is required for “{selectedAlter?.label}”.
+                  </p>
+                )}
+              </>
+            );
+          })()}
         </div>
       )}
 
