@@ -44,6 +44,37 @@ def _strip_json_fences(txt: str) -> str:
         txt = re.sub(r"\s*```$", "", txt)
     return txt.strip()
 
+_ACTION_ALIASES = {
+    "keep": "accept",
+    "keep_separate": "rename",
+    "keep_separate_rename": "rename",
+    "relabel": "rename",
+}
+
+def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Map legacy/invalid action values (from old cache) to valid ones."""
+    if isinstance(result, dict):
+        a = str(result.get("suggested_action", "")).strip().lower()
+        if a in _ACTION_ALIASES:
+            result = {**result, "suggested_action": _ACTION_ALIASES[a]}
+    return result
+
+_ACTION_ALIASES = {
+    "keep": "accept",
+    "keep_separate": "rename",
+    "keep_separate_rename": "rename",
+    "relabel": "rename",
+}
+
+
+def _normalize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Map legacy/invalid action values (from old cached results) to valid ones,
+    e.g. 'keep' -> 'accept', 'keep_separate_rename' -> 'rename'."""
+    if isinstance(result, dict):
+        a = str(result.get("suggested_action", "")).strip().lower()
+        if a in _ACTION_ALIASES:
+            result = {**result, "suggested_action": _ACTION_ALIASES[a]}
+    return result
 
 def _parse_llm_json(raw: str) -> Optional[Dict[str, Any]]:
     try:
@@ -62,6 +93,16 @@ def _parse_llm_json(raw: str) -> Optional[Dict[str, Any]]:
     # target_parent / additional_parent ...) so suggestions are executable.
     params = data.get("action_params")
     data["action_params"] = params if isinstance(params, dict) else {}
+    # Normalize legacy/invalid action values left in old cached results
+    # (e.g. "keep" -> "accept", "keep_separate_rename" -> "rename").
+    _ALIASES = {
+        "keep": "accept",
+        "keep_separate": "rename",
+        "keep_separate_rename": "rename",
+        "relabel": "rename",
+    }
+    action = str(data.get("suggested_action", "")).strip().lower()
+    data["suggested_action"] = _ALIASES.get(action, action)
     return data
 
 
@@ -79,12 +120,12 @@ def score_candidate(
 
     # 1. In-memory cache hit -> return directly (unless force re-run)
     if not force and cache_key in _CACHE:
-        return _CACHE[cache_key]
+        return _normalize_result(_CACHE[cache_key])
 
     # 2. Kill switch: when SKIP_LLM is on, a cache miss returns the
     #    rule-based fallback instead of calling OpenAI (unless force re-run)
     if not force and os.getenv("SKIP_LLM", "").lower() in ("1", "true", "yes"):
-        return dict(fallback)
+        return _normalize_result(dict(fallback))
 
     # 3. Cache miss -> call OpenAI
     sb = _get_supabase()
@@ -115,7 +156,7 @@ def score_candidate(
         except Exception as e:
             print(f"[ai_scoring] cache write failed for {cache_key}: {e}")
 
-    return result
+    return _normalize_result(result)
 
 
 def clear_cache() -> None:
