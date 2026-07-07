@@ -267,7 +267,7 @@ def health():
 
 @app.get("/status/all")
 def all_statuses():
-    """返回所有被改过的 node 的 node_id → status 映射。"""
+    """Return a node_id -> status mapping for all nodes that were changed."""
     sb = _get_supabase()
     if sb is None:
         return {}

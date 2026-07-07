@@ -77,17 +77,28 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "- rename: it is useful but mislabeled or unclear; give it a clearer label.\n"
             "- delete: it adds little organizational value and could be flattened.\n\n"
             "Be conservative.\n\n"
-            "Return STRICT JSON only, no markdown:\n"
+            "Return STRICT JSON only, no markdown, no comments.\n\n"
+            "The JSON MUST have these keys: suggested_action, action_params, "
+            "rationale, confidence.\n\n"
+            "action_params is a REQUIRED object:\n"
+            "- If suggested_action is \"rename\": action_params MUST contain "
+            "\"new_label\", a concrete clearer label, never empty.\n"
+            "- If suggested_action is \"accept\" or \"delete\": use an empty "
+            "object {}.\n\n"
+            "Example for rename:\n"
             "{\n"
-            '  "suggested_action": "accept" | "rename" | "delete",\n'
-            '  "action_params": {\n'
-            '    // for rename: "new_label": "<clearer label>"\n'
-            '    // for accept/delete: {}\n'
-            "  },\n"
-            '  "rationale": "1-2 sentence explanation",\n'
-            '  "confidence": 0.0 to 1.0\n'
-            "}\n"
-            "action_params.new_label is REQUIRED when suggested_action is rename."
+            '  "suggested_action": "rename",\n'
+            '  "action_params": {"new_label": "physical process"},\n'
+            '  "rationale": "The current label is unclear.",\n'
+            '  "confidence": 0.8\n'
+            "}\n\n"
+            "Example for accept:\n"
+            "{\n"
+            '  "suggested_action": "accept",\n'
+            '  "action_params": {},\n'
+            '  "rationale": "This node groups several children well.",\n'
+            '  "confidence": 0.9\n'
+            "}"
         ),
         "user": (
             "## Candidate virtual node\n{candidate}\n\n"
