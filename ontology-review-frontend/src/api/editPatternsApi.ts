@@ -603,3 +603,59 @@ export async function undoEditPatternDecision(patternId: string) {
   }
   return res.json();
 }
+// ---------------------------------------------------------------------------
+// LLM prompt learning variation
+// ---------------------------------------------------------------------------
+
+export interface PromptLearningExample {
+  pattern_id?: string;
+  ai_suggested_action?: string;
+  ai_title?: string;
+  human_decision?: "approve" | "alter" | "reject";
+  human_altered_action?: string | null;
+  human_comment?: string | null;
+}
+
+export interface PromptLearningProposal {
+  ok: boolean;
+  edit_type: PromptEditType;
+  current: EditablePrompt;
+  proposed: EditablePrompt;
+  rationale: string;
+  examples: PromptLearningExample[];
+  example_count: number;
+}
+
+export async function learnPromptFromDecisions(
+  editType: PromptEditType,
+  body: {
+    reviewer: string;
+    min_examples?: number;
+    max_examples?: number;
+  }
+): Promise<PromptLearningProposal> {
+  const res = await fetch(`${API_BASE}/prompts/${encodeURIComponent(editType)}/learn-proposal`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to learn prompt update: ${await res.text()}`);
+  return res.json();
+}
+
+export async function rerunBatchWithCurrentPrompt(
+  body: {
+    edit_type: PromptEditType;
+    reviewer: string;
+    limit?: number;
+    run_all?: boolean;
+  }
+): Promise<{ ok: boolean; edit_type: PromptEditType; run_all: boolean; count: number; suggestions: PatternSuggestion[] }> {
+  const res = await fetch(`${API_BASE}/edit-patterns/rerun-batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Failed to rerun batch: ${await res.text()}`);
+  return res.json();
+}

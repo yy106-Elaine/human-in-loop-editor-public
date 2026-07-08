@@ -195,10 +195,10 @@ export function EditPatternsPage({
   const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
 
   useEffect(() => {
-    getPrinciples()
+    getPrinciples(suggestion.pattern_type)
       .then((data) => setPrinciples(data.principles ?? []))
       .catch(() => setPrinciples([]));
-  }, []);
+  }, [suggestion.pattern_type]);
 
   async function loadSharedState() {
     const [decisionData, conflictData] = await Promise.all([
@@ -731,6 +731,9 @@ export function EditPatternsPage({
       {promptEditorFor && (
         <PromptEditor
           patternType={promptEditorFor}
+          currentUser={currentUser}
+          isAdmin={isAdmin}
+          onBatchComplete={refreshCurrentView}
           onClose={() => setPromptEditorFor(null)}
         />
       )}
@@ -773,6 +776,7 @@ function SuggestionCard({
         comment,
         altered_action: alteredAction,
         principle_update: principleUpdate,
+        principle_category: suggestion.pattern_type,
         link_principle_id: linkPrincipleId ?? undefined,
         payload: {
           pattern_type: suggestion.pattern_type,

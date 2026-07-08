@@ -76,6 +76,7 @@ PRINCIPLES: List[Dict[str, Any]] = [
         ),
         "source": "initial",
         "examples": [],
+        "category": "duplicate",
     },
     {
         "id": "principle-virtual-utility",
@@ -86,6 +87,7 @@ PRINCIPLES: List[Dict[str, Any]] = [
         ),
         "source": "initial",
         "examples": [],
+        "category": "virtual",
     },
 ]
 
@@ -193,6 +195,7 @@ class PatternDecisionRequest(BaseModel):
     comment: Optional[str] = ""
     altered_action: Optional[str] = None
     principle_update: Optional[str] = None
+    principle_category: Optional[str] = None
     link_principle_id: Optional[str] = None
     payload: Dict[str, Any] = {}
 
@@ -1224,6 +1227,7 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
             "body": _text,
             "source": "human_review",
             "examples": [pattern_id],
+            "category": body.principle_category or (body.payload or {}).get("pattern_type") or "all",
             "created_at": record["created_at"],
         }
         PRINCIPLES.append(principle)
@@ -1345,9 +1349,19 @@ def edit_pattern_decisions():
 
 
 @app.get("/principles")
-def get_principles():
-    """Return shared editing principles, including human-updated ones."""
-    return {"principles": PRINCIPLES}
+def get_principles(category: Optional[str] = None):
+    """Return shared editing principles.
+
+    If category is provided, include principles for that edit type plus global/all
+    principles. This keeps principle linking specific to the current edit type.
+    """
+    rows = PRINCIPLES
+    if category and category != "all":
+        rows = [
+            p for p in rows
+            if (p.get("category") or "all") in {category, "all"}
+        ]
+    return {"principles": rows}
 
 
 @app.post("/principles")
@@ -1368,6 +1382,7 @@ def add_principle(body: PatternDecisionRequest):
         "body": text,
         "source": "manual",
         "examples": _examples,
+        "category": body.principle_category or "all",
         "created_at": now_iso(),
     }
     PRINCIPLES.append(principle)
@@ -1380,6 +1395,177 @@ def add_principle(body: PatternDecisionRequest):
 class PromptUpdate(BaseModel):
     system: Optional[str] = None
     user: Optional[str] = None
+
+
+class PromptLearningRequest(BaseModel):
+    reviewer: Optional[str] = "Unassigned"
+    min_examples: int = 3
+    max_examples: int = 8
+    focus_category: Optional[str] = None
+
+
+class BatchRerunRequest(BaseModel):
+    edit_type: str
+    reviewer: Optional[str] = "Unassigned"
+    limit: int = 10
+    run_all: bool = False
+
+
+def _pattern_type_for_prompt(edit_type: str) -> str:
+    return "inheritance" if edit_type == "multiple_inheritance" else edit_type
+
+
+def _recent_decisions_for_prompt_learning(edit_type: str, max_examples: int) -> List[Dict[str, Any]]:
+    pattern_type = _pattern_type_for_prompt(edit_type)
+    rows = [
+        d for d in PATTERN_DECISIONS
+        if (d.get("payload") or {}).get("pattern_type") == pattern_type
+        or str(d.get("pattern_id", "")).startswith(pattern_type + "::")
+    ]
+    return list(reversed(rows))[:max_examples]
+
+
+@app.post("/prompts/{edit_type}/learn-proposal")
+def learn_prompt_proposal(edit_type: str, body: PromptLearningRequest) -> Dict[str, Any]:
+    """Use recent human decisions to propose an improved prompt.
+
+    This does NOT save the prompt and does NOT re-run suggestions. The user sees
+    current vs learned prompt, edits it if needed, then saves manually.
+    """
+    try:
+        current = get_prompt(edit_type)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown edit type: {edit_type}")
+
+    examples = _recent_decisions_for_prompt_learning(edit_type, body.max_examples)
+    if len(examples) < body.min_examples:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Need at least {body.min_examples} reviewed examples for this category; found {len(examples)}.",
+        )
+
+    compact_examples = []
+    for d in examples:
+        payload = d.get("payload") or {}
+        compact_examples.append({
+            "pattern_id": d.get("pattern_id"),
+            "ai_suggested_action": payload.get("suggested_action"),
+            "ai_title": payload.get("title"),
+            "human_decision": d.get("decision"),
+            "human_altered_action": d.get("altered_action"),
+            "human_comment": d.get("comment"),
+        })
+
+    from app.services.llm_client import call_llm
+    import json, re
+
+    system = (
+        "You improve ontology-editing prompts from human feedback. "
+        "Given the current prompt and several human review decisions, propose a revised prompt "
+        "that better reflects the reviewers' behavior. Keep the required JSON output contract intact. "
+        "Return STRICT JSON only with keys: system, user, rationale."
+    )
+    user = (
+        f"EDIT TYPE: {edit_type}\n\n"
+        f"CURRENT SYSTEM PROMPT:\n{current.get('system','')}\n\n"
+        f"CURRENT USER PROMPT:\n{current.get('user','')}\n\n"
+        f"HUMAN DECISION EXAMPLES:\n{json.dumps(compact_examples, indent=2)}\n\n"
+        "Revise the prompts to better guide future AI suggestions. "
+        "Do not remove required fields, allowed action names, or strict JSON requirements."
+    )
+
+    raw = call_llm(system, user, temperature=0.2, max_tokens=1800)
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+    try:
+        parsed = json.loads(cleaned)
+    except Exception:
+        raise HTTPException(status_code=500, detail=f"LLM did not return valid JSON: {raw[:500]}")
+
+    proposed = {
+        "label": current.get("label", edit_type),
+        "system": parsed.get("system") or current.get("system", ""),
+        "user": parsed.get("user") or current.get("user", ""),
+    }
+
+    log_event(
+        node_id=f"prompt::{edit_type}",
+        action_type="llm_prompt_learning_proposal",
+        reviewer=body.reviewer,
+        payload={"edit_type": edit_type, "example_count": len(examples), "rationale": parsed.get("rationale", "")},
+    )
+
+    return {
+        "ok": True,
+        "edit_type": edit_type,
+        "current": current,
+        "proposed": proposed,
+        "rationale": parsed.get("rationale", ""),
+        "examples": compact_examples,
+        "example_count": len(examples),
+    }
+
+
+@app.post("/edit-patterns/rerun-batch")
+def rerun_batch(body: BatchRerunRequest):
+    """Re-run a small batch or all cached AI scores for one edit type.
+
+    Batch mode defaults to 10 to control OpenAI cost. run_all should only be
+    used after prompt refinement looks good.
+    """
+    edit_type = body.edit_type
+    category = _pattern_type_for_prompt(edit_type)
+    if category not in PATTERN_CATEGORY_META:
+        raise HTTPException(status_code=404, detail=f"Unknown edit type: {edit_type}")
+
+    # First collect current candidate ids without any OpenAI calls.
+    import os
+    old_skip = os.environ.get("SKIP_LLM")
+    os.environ["SKIP_LLM"] = "true"
+    try:
+        detected = _detect_category_patterns(category)
+    finally:
+        if old_skip is None:
+            os.environ.pop("SKIP_LLM", None)
+        else:
+            os.environ["SKIP_LLM"] = old_skip
+
+    candidate_ids = [s.get("id") for s in detected.get("suggestions", []) if s.get("id")]
+    target_ids = candidate_ids if body.run_all else candidate_ids[: max(1, min(body.limit, 50))]
+
+    sb = _get_supabase()
+    for cache_key in target_ids:
+        _CACHE.pop(cache_key, None)
+        if sb:
+            try:
+                sb.table("ai_scores").delete().eq("cache_key", cache_key).execute()
+            except Exception as e:
+                print(f"[main] could not delete old score for {cache_key}: {e}")
+
+    # Now rerun detector with current saved prompt. Only deleted cache keys call OpenAI.
+    old_skip = os.environ.get("SKIP_LLM")
+    os.environ["SKIP_LLM"] = "false"
+    try:
+        refreshed = _detect_category_patterns(category)
+    finally:
+        if old_skip is None:
+            os.environ.pop("SKIP_LLM", None)
+        else:
+            os.environ["SKIP_LLM"] = old_skip
+
+    refreshed_map = {s.get("id"): s for s in refreshed.get("suggestions", [])}
+    results = [refreshed_map[k] for k in target_ids if k in refreshed_map]
+
+    log_event(
+        node_id=f"prompt::{edit_type}",
+        action_type="llm_prompt_batch_rerun",
+        reviewer=body.reviewer,
+        payload={"edit_type": edit_type, "run_all": body.run_all, "requested": len(target_ids), "refreshed": len(results)},
+    )
+
+    return {"ok": True, "edit_type": edit_type, "run_all": body.run_all, "count": len(results), "suggestions": results}
 
 
 @app.get("/prompts")
