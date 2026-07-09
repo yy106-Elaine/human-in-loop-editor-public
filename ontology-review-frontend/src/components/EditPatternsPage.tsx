@@ -195,10 +195,11 @@ export function EditPatternsPage({
   const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
 
   useEffect(() => {
-    getPrinciples(suggestion.pattern_type)
+    if (activeKey === ALL_KEY) return;
+    getPrinciples(activeKey)
       .then((data) => setPrinciples(data.principles ?? []))
       .catch(() => setPrinciples([]));
-  }, [suggestion.pattern_type]);
+  }, [activeKey]);
 
   async function loadSharedState() {
     const [decisionData, conflictData] = await Promise.all([
