@@ -829,7 +829,13 @@ function SuggestionCard({
   return (
     <div
       onClick={() => {
-        const ids = (suggestion.nodes ?? []).map((n) => n.id).filter(Boolean);
+        // Multi-node patterns (e.g. duplicate) populate nodes[]; single-node
+        // patterns (e.g. virtual) put their id on suggestion.node_id instead.
+        // Fall back to node_id so those cards can locate/highlight in the tree too.
+        let ids = (suggestion.nodes ?? []).map((n) => n.id).filter(Boolean);
+        if (ids.length === 0 && suggestion.node_id) {
+          ids = [suggestion.node_id];
+        }
         if (ids.length > 0) onFocusNode?.(ids);
       }}
       className={`relative overflow-hidden border rounded-xl shadow-sm p-4 pl-5 cursor-pointer ${colors.card}`}
