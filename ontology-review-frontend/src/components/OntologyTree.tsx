@@ -220,7 +220,7 @@ export function OntologyTree({
   focusNodeIds?: string[];
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [popup, setPopup] = useState<{ synset?: string | null; label: string; x: number; y: number } | null>(null);
+  const [popup, setPopup] = useState<{ synset?: string | null; label: string; hierarchyPath: string; x: number; y: number } | null>(null);
   const [active, setActive] = useState<string>("physical");
   const [query, setQuery] = useState("");
   const [ontology, setOntology] = useState<Record<string, OntologyNode>>({});
@@ -295,6 +295,31 @@ export function OntologyTree({
     return () => clearInterval(interval);
   }, []);
 
+  // Walk the full tree to build the ontology hierarchy path to a node,
+  // e.g. "Physical → matter → fragment". Uses the live tree data (not WordNet),
+  // so virtual nodes get a real path too. Includes the node itself.
+  const buildHierarchyPath = (targetId: string): string => {
+    let result: string[] = [];
+
+    const walk = (nodes: OntologyNode[], trail: string[]): boolean => {
+      for (const n of nodes) {
+        const nextTrail = [...trail, n.label];
+        if (n.id === targetId) {
+          result = nextTrail;
+          return true;
+        }
+        if (n.children && walk(n.children, nextTrail)) return true;
+      }
+      return false;
+    };
+
+    // search across all subontologies so it works regardless of active tab
+    for (const root of Object.values(ontology)) {
+      if (walk([root], [])) break;
+    }
+    return result.join(" → ");
+  };
+
   const handleSelect = (node: OntologyNode, e: React.MouseEvent) => {
     setSelectedId(node.id);
     onNodeSelect(node.id);
@@ -303,6 +328,7 @@ export function OntologyTree({
     setPopup({
       synset: node.synset,
       label: node.label,
+      hierarchyPath: buildHierarchyPath(node.id),
       x: rect.right + 12,
       y: rect.top + rect.height / 2,
     });
@@ -475,6 +501,7 @@ export function OntologyTree({
         <SemanticReviewPopup
           synsetId={popup.synset}
           label={popup.label}
+          hierarchyPath={popup.hierarchyPath}
           x={popup.x}
           y={popup.y}
           onClose={() => setPopup(null)}

@@ -6,6 +6,8 @@ interface SemanticReviewPopupProps {
   synsetId?: string | null;
   /** fallback: plain word label, e.g. "hardware" */
   label?: string;
+  /** full ontology hierarchy path from the live tree, e.g. "Physical → matter → fragment" */
+  hierarchyPath?: string;
   /** screen position: popup's left edge and vertical center */
   x: number;
   y: number;
@@ -15,6 +17,7 @@ interface SemanticReviewPopupProps {
 export function SemanticReviewPopup({
   synsetId,
   label,
+  hierarchyPath,
   x,
   y,
   onClose,
@@ -25,8 +28,10 @@ export function SemanticReviewPopup({
     ? findSemanticByLabel(label)
     : null;
 
-  const parents = info?.pathParents
-    ? info.pathParents.split(">").map((s) => s.trim()).filter(Boolean)
+  // Ontology hierarchy path comes from the live tree (passed in), NOT from the
+  // WordNet-style Path field in nodes-data.json. Split on the "→" separator.
+  const parents = hierarchyPath
+    ? hierarchyPath.split("→").map((s) => s.trim()).filter(Boolean)
     : [];
 
   return (
@@ -51,63 +56,58 @@ export function SemanticReviewPopup({
 
         {/* content */}
         <div className="max-h-[60vh] overflow-y-auto overflow-x-hidden p-4 pr-8">
-          {!info ? (
-            <p className="text-sm text-gray-500">
-              No semantic data found for{" "}
-              <span className="font-medium">{synsetId ?? label}</span>.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {/* title */}
-              <div>
-                <h3 className="text-base font-semibold leading-tight text-gray-900">
-                  {info.label || info.synsetId}
-                </h3>
+          <div className="space-y-4">
+            {/* title — falls back to the passed-in label when semantic data is missing */}
+            <div>
+              <h3 className="text-base font-semibold leading-tight text-gray-900">
+                {info?.label || label || info?.synsetId}
+              </h3>
+              {info?.synsetId && (
                 <p className="text-xs text-gray-500">{info.synsetId}</p>
-              </div>
-
-              {/* WordNet Definition */}
-              <section>
-                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  WordNet Definition
-                </h4>
-                <p className="text-sm leading-relaxed text-gray-800">
-                  {info.definition || "—"}
-                </p>
-              </section>
-
-              {/* Current Parent(s) */}
-              <section>
-                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Current Parent(s)
-                </h4>
-                {parents.length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm leading-relaxed text-gray-800">
-                    {parents.map((p, i) => (
-                      <span key={i} className="inline-flex items-center">
-                        <span className="break-all">{p}</span>
-                        {i < parents.length - 1 && (
-                          <span className="ml-1 text-gray-400">→</span>
-                        )}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500">—</p>
-                )}
-              </section>
-
-              {/* O*NET Task Examples */}
-              <section>
-                <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  O*NET Task Examples
-                </h4>
-                <p className="text-sm leading-relaxed text-gray-800">
-                  {info.taskExample || "—"}
-                </p>
-              </section>
+              )}
             </div>
-          )}
+
+            {/* WordNet Definition */}
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                WordNet Definition
+              </h4>
+              <p className="text-sm leading-relaxed text-gray-800">
+                {info?.definition || "—"}
+              </p>
+            </section>
+
+            {/* Current Parent(s) — from the live ontology tree, always shown when available */}
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Current Parent(s)
+              </h4>
+              {parents.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm leading-relaxed text-gray-800">
+                  {parents.map((p, i) => (
+                    <span key={i} className="inline-flex items-center">
+                      <span className="break-all">{p}</span>
+                      {i < parents.length - 1 && (
+                        <span className="ml-1 text-gray-400">→</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">—</p>
+              )}
+            </section>
+
+            {/* O*NET Task Examples */}
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                O*NET Task Examples
+              </h4>
+              <p className="text-sm leading-relaxed text-gray-800">
+                {info?.taskExample || "—"}
+              </p>
+            </section>
+          </div>
         </div>
 
         {/* speech-bubble tail — points LEFT toward the node, vertically centered */}
