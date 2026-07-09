@@ -237,7 +237,7 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
     }
 
 
-def detect_virtual_node_patterns(limit: int = 75) -> Dict[str, Any]:
+def detect_virtual_node_patterns(limit: int | None = 75) -> Dict[str, Any]:
     flat = flatten_ontology()
     candidates = [n for n in flat if n.is_virtual]
 
@@ -247,7 +247,10 @@ def detect_virtual_node_patterns(limit: int = 75) -> Dict[str, Any]:
 
     suggestions = [_virtual_suggestion(n) for n in candidates]
     suggestions.sort(key=lambda x: (-x["confidence"], x["label"]))
-    return {"pattern_type": "virtual", "count": len(suggestions), "suggestions": suggestions[:limit]}
+    # limit=None returns the full list (used by re-run, which must be able to
+    # locate ANY node, not just the top 75 shown in the paginated UI).
+    sliced = suggestions if limit is None else suggestions[:limit]
+    return {"pattern_type": "virtual", "count": len(suggestions), "suggestions": sliced}
 
 
 def detect_all_edit_patterns() -> Dict[str, Any]:

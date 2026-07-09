@@ -1103,30 +1103,51 @@ def rerun_node(body: RerunNodeRequest):
         except Exception as e:
             print(f"[main] could not delete old score for {cache_key}: {e}")
 
-    # 3. Re-run the category detector. Only the deleted key calls OpenAI;
-    #    every other node is served from the warm cache.
+    # 3. Re-score ONLY this node directly, instead of re-running the whole
+    #    category detector and fishing the id back out (which was fragile:
+    #    pagination limits / sort order / id drift could all make the match
+    #    fail even though the node exists). We deleted its cache above, and
+    #    _virtual_suggestion / detect_duplicate_patterns will re-call OpenAI
+    #    for this one key (every other node stays warm-cached).
     import os
     old_skip = os.environ.get("SKIP_LLM")
     os.environ["SKIP_LLM"] = "false"  # force a real OpenAI call for the deleted key
     try:
-        detected = _detect_category_patterns(category)
+        match = None
+
+        if category == "virtual":
+            # cache_key == f"virtual::{node.id}"; recover the node id and
+            # re-score just that node.
+            from app.services.edit_patterns import (
+                flatten_ontology,
+                _virtual_suggestion,
+            )
+            node_id = cache_key.split("::", 1)[1]
+            flat_node = next(
+                (n for n in flatten_ontology() if n.id == node_id), None
+            )
+            if flat_node is not None:
+                match = _virtual_suggestion(flat_node)
+        else:
+            # Other categories key by something other than node.id
+            # (e.g. duplicate::{label}), so fall back to the detector and
+            # match by id — but WITHOUT any pagination cap.
+            detected = _detect_category_patterns(category)
+            match = next(
+                (s for s in detected.get("suggestions", []) if s.get("id") == cache_key),
+                None,
+            )
     finally:
         if old_skip is None:
             os.environ.pop("SKIP_LLM", None)
         else:
             os.environ["SKIP_LLM"] = old_skip
 
-    # 4. Find the freshly scored suggestion for this cache_key
-    match = next(
-        (s for s in detected.get("suggestions", []) if s.get("id") == cache_key),
-        None,
-    )
     if match is None:
         raise HTTPException(
             status_code=404,
             detail=f"Re-run did not produce a result for {cache_key}",
         )
-
     return {"ok": True, "cache_key": cache_key, "suggestion": match}
 
 @app.get("/edit-patterns/duplicates")
@@ -1525,7 +1546,13 @@ def rerun_batch(body: BatchRerunRequest):
     old_skip = os.environ.get("SKIP_LLM")
     os.environ["SKIP_LLM"] = "true"
     try:
-        detected = _detect_category_patterns(category)
+        # Re-run must be able to find ANY node, so bypass the UI's 75-item cap
+        # for virtual (the detector truncates by default for pagination).
+        if category == "virtual":
+            from app.services.edit_patterns import detect_virtual_node_patterns
+            detected = detect_virtual_node_patterns(limit=None)
+        else:
+            detected = _detect_category_patterns(category)
     finally:
         if old_skip is None:
             os.environ.pop("SKIP_LLM", None)
