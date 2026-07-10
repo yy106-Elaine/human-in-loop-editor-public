@@ -10,8 +10,17 @@ import {
   type PatternType,
   type UserRole,
 } from "./api/editPatternsApi";
+import { getOntologyTree } from "./api/ontologyApi";
 
 export type ErrorHighlightMap = Record<string, PatternType>;
+
+// Lightweight flat node option for ID autocomplete (Alter panel).
+export interface NodeOption {
+  id: string;
+  label: string;
+  code: string | null;
+  path: string;
+}
 
 function getAdminEmails(): string[] {
   return String(import.meta.env.VITE_ADMIN_EMAILS || "")
@@ -28,6 +37,29 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [errorHighlights, setErrorHighlights] = useState<ErrorHighlightMap>({});
   const [activeTreeFilter, setActiveTreeFilter] = useState<PatternType | "all" | null>(null);
+  const [nodeOptions, setNodeOptions] = useState<NodeOption[]>([]);
+
+  // Load the tree once and flatten it for the Alter-panel ID autocomplete.
+  useEffect(() => {
+    interface BackendNode {
+      id: string;
+      label: string;
+      code: string | null;
+      children: BackendNode[];
+    }
+    getOntologyTree()
+      .then((roots: BackendNode[]) => {
+        const flat: NodeOption[] = [];
+        const walk = (n: BackendNode, trail: string[]) => {
+          const path = [...trail, n.label];
+          flat.push({ id: n.id, label: n.label, code: n.code, path: path.join(" → ") });
+          (n.children ?? []).forEach((c) => walk(c, path));
+        };
+        roots.forEach((r) => walk(r, []));
+        setNodeOptions(flat);
+      })
+      .catch(() => setNodeOptions([]));
+  }, []);
 
   useEffect(() => {
     supabase.auth
@@ -140,6 +172,7 @@ export default function App() {
                 setPage={setPage}
                 principlesView={<PrinciplesPage currentUser={currentEmail} />}
                 onFocusNode={setFocusNodeIds}
+                nodeOptions={nodeOptions}
               />
             </div>
           </main>

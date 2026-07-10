@@ -1,4 +1,6 @@
 import { PromptEditor } from "./PromptEditor";
+import { NodeIdAutocomplete } from "./NodeIdAutocomplete";
+import type { NodeOption } from "../App";
 import { useEffect, useMemo, useState, type ReactNode, type LucideIcon } from "react";
 import {
   AlertTriangle,
@@ -164,6 +166,7 @@ export function EditPatternsPage({
   setPage,
   principlesView,
   onFocusNode,
+  nodeOptions = [],
 }: {
   selectedNodeId?: string | null;
   currentUser: string;
@@ -173,6 +176,7 @@ export function EditPatternsPage({
   setPage: (p: "editor" | "principles") => void;
   principlesView: ReactNode;
   onFocusNode?: (nodeIds: string[]) => void;
+  nodeOptions?: NodeOption[];
 }) {
   const [categories, setCategories] = useState<PatternCategory[]>([]);
   const [activeKey, setActiveKey] = useState<PatternType | typeof ALL_KEY>("duplicate");
@@ -679,6 +683,7 @@ export function EditPatternsPage({
                           onDecision={refreshCurrentView}
                           principles={principles}
                           onFocusNode={onFocusNode}
+                          nodeOptions={nodeOptions}
                         />
                       ))
                     )}
@@ -750,6 +755,7 @@ function SuggestionCard({
   onDecision,
   principles,
   onFocusNode,
+  nodeOptions = [],
 }: {
   suggestion: PatternSuggestion;
   currentUser: string;
@@ -758,6 +764,7 @@ function SuggestionCard({
   onDecision: () => void | Promise<void>;
   principles: PrincipleOption[];
   onFocusNode?: (nodeIds: string[]) => void;
+  nodeOptions?: NodeOption[];
 }) {
   const [mode, setMode] = useState<"approve" | "alter" | "reject" | null>(null);
   const [comment, setComment] = useState("");
@@ -1016,24 +1023,41 @@ function SuggestionCard({
                 const selected = ALTER_ACTIONS.find((a) => a.kind === actionKind);
                 if (!selected?.requiredField) return null;
 
+                // Node-ID fields get search-as-you-type over the ontology;
+                // rename's "new label" stays a plain text input.
+                const needsNodeId = ["merge", "add_parent", "place_elsewhere"].includes(
+                  actionKind ?? ""
+                );
+
+                const applyValue = (v: string) => {
+                  setActionField(v);
+                  setAlteredAction(
+                    v.trim() ? `${selected.label} → ${v.trim()}` : selected.label
+                  );
+                };
+
                 return (
                   <div className="mt-3">
                     <label className="block text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-1">
                       {selected.requiredField.label}
                     </label>
-                    <input
-                      value={actionField}
-                      onChange={(e) => {
-                        setActionField(e.target.value);
-                        setAlteredAction(
-                          e.target.value.trim()
-                            ? `${selected.label} → ${e.target.value.trim()}`
-                            : selected.label
-                        );
-                      }}
-                      placeholder={selected.requiredField.placeholder}
-                      className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400"
-                    />
+                    {needsNodeId ? (
+                      <NodeIdAutocomplete
+                        value={actionField}
+                        onChange={applyValue}
+                        onPick={(n) => applyValue(n.id)}
+                        nodeOptions={nodeOptions}
+                        onFocusNode={onFocusNode}
+                        placeholder={selected.requiredField.placeholder}
+                      />
+                    ) : (
+                      <input
+                        value={actionField}
+                        onChange={(e) => applyValue(e.target.value)}
+                        placeholder={selected.requiredField.placeholder}
+                        className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                      />
+                    )}
                   </div>
                 );
               })()}
