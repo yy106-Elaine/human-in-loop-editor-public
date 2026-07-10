@@ -729,39 +729,43 @@ export function EditPatternsPage({
 
                 {statusFilter !== "unfinished" && (
                   <div className={statusFilter === "finished" ? "" : "mt-10 border-t border-gray-200 pt-6"}>
-                    <h3 className="text-lg font-semibold text-gray-900">
-                      Finished Changes
-                    </h3>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Decisions already made on the suggestions above.
-                    </p>
-
-                    {relevantDecisions.length > 0 && (
-                      <div className="mt-3 flex items-center gap-3">
-                        <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 shrink-0">
-                          {([
-                            ["all", `All (${relevantDecisions.length})`],
-                            ["mine", `Mine (${mineFinishedCount})`],
-                          ] as const).map(([key, label]) => (
-                            <button
-                              key={key}
-                              onClick={() => setFinishedFilter(key)}
-                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                                finishedFilter === key
-                                  ? "bg-white text-gray-900 shadow-sm"
-                                  : "text-gray-600 hover:text-gray-900"
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                        <p className="text-xs text-gray-400">
-                          Showing {finishedToShow.length} of {relevantDecisions.length}
-                          {finishedFilter === "mine" ? " · your decisions" : ""} · newest first
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-lg font-semibold text-gray-900">
+                          Finished Changes
+                        </h3>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Decisions already made on the suggestions above.
                         </p>
                       </div>
-                    )}
+
+                      {relevantDecisions.length > 0 && (
+                        <div className="shrink-0 flex flex-col items-end gap-1">
+                          <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-0.5">
+                            {([
+                              ["all", `All (${relevantDecisions.length})`],
+                              ["mine", `Mine (${mineFinishedCount})`],
+                            ] as const).map(([key, label]) => (
+                              <button
+                                key={key}
+                                onClick={() => setFinishedFilter(key)}
+                                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                                  finishedFilter === key
+                                    ? "bg-white text-gray-900 shadow-sm"
+                                    : "text-gray-600 hover:text-gray-900"
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-xs text-gray-400">
+                            Showing {finishedToShow.length} of {relevantDecisions.length}
+                            {finishedFilter === "mine" ? " · your decisions" : ""} · newest first
+                          </p>
+                        </div>
+                      )}
+                    </div>
 
                     {relevantDecisions.length === 0 ? (
                       <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
