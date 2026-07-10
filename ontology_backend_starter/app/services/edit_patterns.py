@@ -71,6 +71,19 @@ def flatten_ontology() -> List[FlatNode]:
 def _norm_label(label: str) -> str:
     return label.replace("_", " ").replace("-", " ").replace("[virtual]", "").strip().lower()
 
+def _rerun_with_current_prompt(scored: Dict[str, Any], edit_type: str) -> bool:
+    """True when this cached score was produced AFTER the prompt's last update,
+    i.e. it reflects the newest prompt version."""
+    from app.services.prompts import get_prompt
+    scored_at = scored.get("_scored_at")
+    if not scored_at:
+        return False
+    prompt_updated = get_prompt(
+        "multiple_inheritance" if edit_type == "inheritance" else edit_type
+    ).get("updated_at")
+    if not prompt_updated:
+        return True  # prompt never updated -> any score is "current"
+    return str(scored_at) > str(prompt_updated)
 
 def detect_duplicate_patterns() -> Dict[str, Any]:
     flat = flatten_ontology()
@@ -138,6 +151,7 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
             {
                 "id": f"duplicate::{label_key}",
                 "pattern_type": "duplicate",
+                "rerun_with_current_prompt": _rerun_with_current_prompt(scored, "duplicate"),
                 "label": nodes[0].label,
                 "title": f"Duplicate label: {nodes[0].label}",
                 "suggested_action": scored["suggested_action"],
@@ -223,6 +237,7 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
     return {
         "id": f"virtual::{node.id}",
         "pattern_type": "virtual",
+        "rerun_with_current_prompt": _rerun_with_current_prompt(scored, "virtual"),
         "node_id": node.id,
         "label": node.label,
         "code": node.code,

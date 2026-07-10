@@ -149,9 +149,13 @@ def score_candidate(
     _CACHE[cache_key] = result
     if sb and not used_fallback:
         try:
+            from datetime import datetime, timezone
+            scored_at = datetime.now(timezone.utc).isoformat()
+            result["_scored_at"] = scored_at
             sb.table("ai_scores").upsert({
                 "cache_key": cache_key,
                 "result": result,
+                "scored_at": scored_at,
             }).execute()
         except Exception as e:
             print(f"[ai_scoring] cache write failed for {cache_key}: {e}")

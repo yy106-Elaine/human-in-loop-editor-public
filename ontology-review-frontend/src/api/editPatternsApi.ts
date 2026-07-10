@@ -29,6 +29,7 @@ export interface PatternSuggestion {
   nodes?: PatternNode[];
   synsets?: string[];
   node_id?: string;
+  rerun_with_current_prompt?: boolean;
   code?: string | null;
   parent_label?: string | null;
   path?: string;

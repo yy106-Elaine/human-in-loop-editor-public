@@ -186,12 +186,27 @@ export function EditPatternsPage({
   const [promptEditorFor, setPromptEditorFor] = useState<PatternType | null>(null);
   const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
 
-  useEffect(() => {
+  async function loadPrinciples() {
     if (activeKey === ALL_KEY) return;
-    getPrinciples(activeKey)
-      .then((data) => setPrinciples(data.principles ?? []))
-      .catch(() => setPrinciples([]));
+    try {
+      const data = await getPrinciples(activeKey);
+      setPrinciples(data.principles ?? []);
+    } catch {
+      setPrinciples([]);
+    }
+  }
+
+  useEffect(() => {
+    loadPrinciples();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
+
+  // Re-pull principles whenever the user returns to the Editor tab, so
+  // principles added on the Principles page show up without a full reload.
+  useEffect(() => {
+    if (page === "editor") loadPrinciples();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
 
   async function loadSharedState() {
     const [decisionData, conflictData] = await Promise.all([
@@ -281,6 +296,7 @@ export function EditPatternsPage({
     setStatus("");
     try {
       await loadSharedState();
+      await loadPrinciples();
 
       if (activeKey === ALL_KEY) {
         await Promise.all(categories.map((c) => loadCategory(c.key, { append: false })));
@@ -752,6 +768,10 @@ function SuggestionCard({
   const [linkPrincipleId, setLinkPrincipleId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [rerunning, setRerunning] = useState(false);
+  // After a re-run, hold the fresh result locally (so the card updates in
+  // place without reloading/re-sorting the whole list) and mark it visually.
+  const [localSuggestion, setLocalSuggestion] = useState<PatternSuggestion | null>(null);
+  const [wasRerun, setWasRerun] = useState(false);
 
   async function submit(decision: "approve" | "alter" | "reject") {
     try {
@@ -799,7 +819,10 @@ function SuggestionCard({
           res.suggestion.confidence * 100
         )}%).`
       );
-      await onDecision();
+      // Update this card in place; do NOT reload the whole list so the card
+      // stays where it is (list re-sorts only on manual Refresh).
+      setLocalSuggestion({ ...suggestion, ...res.suggestion });
+      setWasRerun(true);
     } catch (err) {
       console.error(err);
       setStatus("Could not re-run this node.");
@@ -808,7 +831,9 @@ function SuggestionCard({
     }
   }
 
-  const colors = PATTERN_COLORS[suggestion.pattern_type ?? ""] ?? DEFAULT_COLOR;
+  // Prefer the locally re-run result for display.
+  const shown = localSuggestion ?? suggestion;
+  const colors = PATTERN_COLORS[shown.pattern_type ?? ""] ?? DEFAULT_COLOR;
 
   return (
     <div
@@ -828,8 +853,13 @@ function SuggestionCard({
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h4 className="text-base font-semibold text-gray-900">
-            {suggestion.title}
+          <h4 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+            {shown.title}
+            {(wasRerun || shown.rerun_with_current_prompt) && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 border border-sky-200">
+                re-run · current prompt
+              </span>
+            )}
           </h4>
           <p className="text-sm text-gray-500 mt-1">
             Suggested action:{" "}

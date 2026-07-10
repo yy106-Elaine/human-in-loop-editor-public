@@ -220,7 +220,7 @@ def _load_prompts() -> None:
         return
     try:
         _seed_defaults_to_supabase(sb)
-        rows = sb.table("prompts").select("edit_type,label,system,user").execute()
+        rows = sb.table("prompts").select("edit_type,label,system,user,updated_at").execute()
         for row in rows.data:
             et = row["edit_type"]
             if et in _PROMPTS:
@@ -228,6 +228,7 @@ def _load_prompts() -> None:
                     "label": row.get("label", _PROMPTS[et].get("label", "")),
                     "system": row["system"],
                     "user": row["user"],
+                    "updated_at": row.get("updated_at"),
                 }
         print(f"[prompts] loaded {len(rows.data)} prompts from Supabase")
     except Exception as e:
@@ -253,6 +254,10 @@ def update_prompt(edit_type: str, system: str | None = None, user: str | None = 
     if user is not None:
         _PROMPTS[edit_type]["user"] = user
 
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _PROMPTS[edit_type]["updated_at"] = now_iso
+
     sb = _get_supabase()
     if sb:
         try:
@@ -261,7 +266,7 @@ def update_prompt(edit_type: str, system: str | None = None, user: str | None = 
                 "label": _PROMPTS[edit_type].get("label", ""),
                 "system": _PROMPTS[edit_type]["system"],
                 "user": _PROMPTS[edit_type]["user"],
-                "updated_at": "now()",
+                "updated_at": now_iso,
             }).execute()
         except Exception as e:
             print(f"[prompts] could not persist {edit_type}: {e}")
