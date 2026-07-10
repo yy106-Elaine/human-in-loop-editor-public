@@ -832,6 +832,7 @@ function SuggestionCard({
   const [alteredAction, setAlteredAction] = useState("");
   const [actionKind, setActionKind] = useState<string | null>(null);
   const [actionField, setActionField] = useState("");
+  const [mergeParent, setMergeParent] = useState("");
   const [principleUpdate, setPrincipleUpdate] = useState("");
   const [linkPrincipleId, setLinkPrincipleId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
@@ -851,11 +852,18 @@ function SuggestionCard({
 
   async function submit(decision: "approve" | "alter" | "reject") {
     try {
+      // For merge, append the chosen destination parent to the recorded action
+      // (record-only — we do not mutate the ontology JSON here).
+      const finalAlteredAction =
+        actionKind === "merge" && mergeParent.trim()
+          ? `${alteredAction} · under ${mergeParent.trim()}`
+          : alteredAction;
+
       await decideEditPattern(suggestion.id, {
         decision,
         reviewer: currentUser,
         comment,
-        altered_action: alteredAction,
+        altered_action: finalAlteredAction,
         principle_update: principleUpdate,
         principle_category: suggestion.pattern_type,
         link_principle_id: linkPrincipleId ?? undefined,
@@ -864,6 +872,10 @@ function SuggestionCard({
           suggested_action: suggestion.suggested_action,
           action_params: suggestion.action_params ?? {},
           title: suggestion.title,
+          merge_parent:
+            actionKind === "merge" && mergeParent.trim()
+              ? mergeParent.trim()
+              : undefined,
         },
       });
 
@@ -873,6 +885,7 @@ function SuggestionCard({
       setAlteredAction("");
       setActionKind(null);
       setActionField("");
+      setMergeParent("");
       setPrincipleUpdate("");
       setLinkPrincipleId(null);
       await onDecision();
@@ -1119,6 +1132,22 @@ function SuggestionCard({
                         className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400"
                       />
                     )}
+
+                    {actionKind === "merge" && (
+                      <div className="mt-3">
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-1">
+                          Merge under which parent?
+                        </label>
+                        <NodeIdAutocomplete
+                          value={mergeParent}
+                          onChange={setMergeParent}
+                          onPick={(n) => setMergeParent(n.id)}
+                          nodeOptions={nodeOptions}
+                          onFocusNode={onFocusNode}
+                          placeholder="e.g. building.n.01"
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -1173,10 +1202,16 @@ function SuggestionCard({
             // value (rename -> new label, merge/add_parent/place_elsewhere -> ID)
             // it must be filled before the decision can be saved.
             const selectedAlter = ALTER_ACTIONS.find((a) => a.kind === actionKind);
-            const missingRequired =
+            const missingField =
               mode === "alter" &&
               Boolean(selectedAlter?.requiredField) &&
               actionField.trim() === "";
+            // Merge also requires choosing which parent the merged node lands under.
+            const missingMergeParent =
+              mode === "alter" &&
+              actionKind === "merge" &&
+              mergeParent.trim() === "";
+            const missingRequired = missingField || missingMergeParent;
             return (
               <>
                 <button
@@ -1186,9 +1221,14 @@ function SuggestionCard({
                 >
                   Save {mode} decision
                 </button>
-                {missingRequired && (
+                {missingField && (
                   <p className="mt-1 text-xs text-amber-600">
-                    {selectedAlter?.requiredField?.label} is required for “{selectedAlter?.label}”.
+                    {selectedAlter?.requiredField?.label} is required for "{selectedAlter?.label}".
+                  </p>
+                )}
+                {!missingField && missingMergeParent && (
+                  <p className="mt-1 text-xs text-amber-600">
+                    Parent is required for Merge — choose which node the merged item lands under.
                   </p>
                 )}
               </>
