@@ -773,6 +773,14 @@ function SuggestionCard({
   const [localSuggestion, setLocalSuggestion] = useState<PatternSuggestion | null>(null);
   const [wasRerun, setWasRerun] = useState(false);
 
+  // When the parent list is refreshed (new suggestion object arrives), drop
+  // local re-run state so the badge reflects the backend's current-prompt
+  // comparison instead of a stale session flag.
+  useEffect(() => {
+    setLocalSuggestion(null);
+    setWasRerun(false);
+  }, [suggestion]);
+
   async function submit(decision: "approve" | "alter" | "reject") {
     try {
       await decideEditPattern(suggestion.id, {

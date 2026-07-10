@@ -20,6 +20,7 @@ from app.services.edit_patterns import (
     detect_duplicate_patterns,
     detect_virtual_node_patterns,
     detect_all_edit_patterns,
+    _rerun_with_current_prompt,
     get_node_pattern_context,
 )
 
@@ -666,6 +667,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
             {
                 "id": f"inheritance::{label}",
                 "pattern_type": "inheritance",
+                "rerun_with_current_prompt": _rerun_with_current_prompt(_inh_scored, "inheritance"),
                 "label": matches[0]["label"],
                 "title": f"Multiple inheritance candidate: {matches[0]['label']}",
                 "suggested_action": _inh_scored["suggested_action"],
@@ -766,6 +768,7 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
                 {
                     "id": f"misplaced::{row['id']}",
                     "pattern_type": "misplaced",
+                    "rerun_with_current_prompt": _rerun_with_current_prompt(_mis_scored, "misplaced"),
                     "node_id": row["id"],
                     "label": row["label"],
                     "code": row.get("code"),
@@ -854,6 +857,7 @@ def _detect_naming_patterns() -> Dict[str, Any]:
             {
                 "id": f"naming::{row['id']}",
                 "pattern_type": "naming",
+                "rerun_with_current_prompt": _rerun_with_current_prompt(_nam_scored, "naming"),
                 "node_id": row["id"],
                 "label": row["label"],
                 "code": row.get("code"),
