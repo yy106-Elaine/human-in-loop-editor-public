@@ -421,14 +421,17 @@ export function EditPatternsPage({
   // A pattern can have several historical decisions (re-decided over time).
   // Keep only the latest per pattern_id so Finished shows each item once.
   const relevantDecisions = useMemo(() => {
-    const latestByPattern = new Map<string, FinishedChange>();
+    // Keep the latest decision PER (pattern, reviewer) so each teammate's
+    // decision shows as its own row with its own Undo.
+    const latestByKey = new Map<string, FinishedChange>();
     for (const d of categoryDecisions) {
-      const existing = latestByPattern.get(d.pattern_id);
+      const key = `${d.pattern_id}::${d.reviewer}`;
+      const existing = latestByKey.get(key);
       if (!existing || new Date(d.created_at) > new Date(existing.created_at)) {
-        latestByPattern.set(d.pattern_id, d);
+        latestByKey.set(key, d);
       }
     }
-    return Array.from(latestByPattern.values());
+    return Array.from(latestByKey.values());
   }, [categoryDecisions]);
 
   // Unfinished = suggestions actually loaded that have no decision yet.
@@ -718,10 +721,11 @@ export function EditPatternsPage({
                     ) : (
                       <div className="mt-4 space-y-2">
                         {[...relevantDecisions].reverse().map((d) => (
-                          <FinishedChangeRow 
-                          key={d.id} 
-                          change={d} 
-                          onUndo={refreshCurrentView} 
+                          <FinishedChangeRow
+                            key={d.id}
+                            change={d}
+                            onUndo={refreshCurrentView}
+                            currentUser={currentUser}
                           />
                         ))}
                       </div>
@@ -1234,12 +1238,14 @@ function ConflictResolutionPanel({
   );
 }
 
-function FinishedChangeRow({ 
-  change, 
-  onUndo 
-}: { 
+function FinishedChangeRow({
+  change,
+  onUndo,
+  currentUser,
+}: {
   change: FinishedChange;
   onUndo?: () => Promise<void> | void;
+  currentUser: string;
 }) {
   const [isUndoing, setIsUndoing] = useState(false);
 
@@ -1272,7 +1278,7 @@ function FinishedChangeRow({
     if (!onUndo) return;
     setIsUndoing(true);
     try {
-      await undoEditPatternDecision(change.pattern_id);
+      await undoEditPatternDecision(change.pattern_id, currentUser);
       await onUndo(); 
     } catch (err) {
       console.error("Undo failed:", err);
@@ -1327,7 +1333,7 @@ function FinishedChangeRow({
         >
           {change.decision}
         </span>
-        {onUndo && (
+        {onUndo && change.reviewer === currentUser && (
           <button
             onClick={handleUndo}
             disabled={isUndoing}

@@ -591,9 +591,9 @@ export async function decideAutoReviewItem(
   return res.json();
 }
 
-export async function undoEditPatternDecision(patternId: string) {
+export async function undoEditPatternDecision(patternId: string, reviewer: string) {
   const res = await fetch(
-    `${API_BASE}/edit-patterns/${encodeURIComponent(patternId)}/decision`,
+    `${API_BASE}/edit-patterns/${encodeURIComponent(patternId)}/decision?reviewer=${encodeURIComponent(reviewer)}`,
     {
       method: "DELETE",
     }

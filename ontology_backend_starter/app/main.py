@@ -1226,8 +1226,9 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
     if decision not in {"approve", "alter", "reject"}:
         raise HTTPException(status_code=400, detail="decision must be approve, alter, or reject")
 
+    import uuid
     record = {
-        "id": f"pattern-decision-{len(PATTERN_DECISIONS) + 1}",
+        "id": f"pattern-decision-{uuid.uuid4().hex[:12]}",
         "pattern_id": pattern_id,
         "decision": decision,
         "reviewer": body.reviewer or "Unassigned",
@@ -1288,51 +1289,61 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
     }
 
 @app.delete("/edit-patterns/{pattern_id:path}/decision")
-def undo_edit_pattern_decision(pattern_id: str):
+def undo_edit_pattern_decision(pattern_id: str, reviewer: str = ""):
     """
     Undo a human decision on an edit-pattern suggestion.
-    Removes the decision from PATTERN_DECISIONS and unlinks from principles.
+
+    Only removes decisions made by the requesting reviewer, so one person's
+    undo never wipes out a teammate's decision on the same suggestion.
     """
-    # 1. Find ALL decision records for this pattern (a pattern can have several
-    #    historical decisions; undo should clear all of them in one click).
-    matching = [d for d in PATTERN_DECISIONS if d.get("pattern_id") == pattern_id]
+    if not reviewer:
+        raise HTTPException(status_code=400, detail="reviewer is required to undo")
 
+    # 1. Find THIS reviewer's decision records for this pattern.
+    matching = [
+        d for d in PATTERN_DECISIONS
+        if d.get("pattern_id") == pattern_id and d.get("reviewer") == reviewer
+    ]
     if not matching:
-        # If none found, it might have already been deleted. Return success anyway.
-        return {"ok": True, "message": "No decision found to undo."}
+        return {"ok": True, "message": "No decision by this reviewer to undo."}
 
-    # 2a. Remove every matching record from memory (modify in place to keep the reference).
+    # 2a. Remove only this reviewer's records from memory.
     PATTERN_DECISIONS[:] = [
-        d for d in PATTERN_DECISIONS if d.get("pattern_id") != pattern_id
+        d for d in PATTERN_DECISIONS
+        if not (d.get("pattern_id") == pattern_id and d.get("reviewer") == reviewer)
     ]
     removed_count = len(matching)
 
-    # 2b. Also delete from Supabase so the undo survives a backend restart
-    #     (decisions are double-written: in-memory + pattern_decisions table).
+    # 2b. Delete only this reviewer's rows from Supabase.
     sb = _get_supabase()
     if sb:
         try:
-            sb.table("pattern_decisions").delete().eq("pattern_id", pattern_id).execute()
+            sb.table("pattern_decisions").delete().eq(
+                "pattern_id", pattern_id
+            ).eq("reviewer", reviewer).execute()
         except Exception as e:
             print(f"[main] could not delete pattern decision(s) from Supabase: {e}")
 
-    # 3. Clean up potentially linked Principle examples (if it was previously linked)
-    for p in PRINCIPLES:
-        if pattern_id in p.get("examples", []):
-            p["examples"].remove(pattern_id)
+    # 3. Unlink from principle examples only when NO decisions remain on this
+    #    pattern (another reviewer's decision may still justify the link).
+    still_decided = any(d.get("pattern_id") == pattern_id for d in PATTERN_DECISIONS)
+    if not still_decided:
+        for p in PRINCIPLES:
+            if pattern_id in p.get("examples", []):
+                p["examples"].remove(pattern_id)
 
-    # 4. Log the undo event
+    # 4. Log the undo event with the real reviewer
     log_event(
         node_id=pattern_id,
         action_type="undo_edit_pattern_decision",
-        reviewer="System", # Or extract current user from request if available
-        notes="Undid previous decision",
+        reviewer=reviewer,
+        notes="Undid own previous decision",
         payload={}
     )
 
     return {
         "ok": True,
-        "message": f"Successfully undid decision for {pattern_id}."
+        "message": f"Successfully undid {removed_count} decision(s) by {reviewer} for {pattern_id}."
     }
 
 @app.get("/collaboration/conflicts")
@@ -2015,7 +2026,7 @@ def decide_learning_auto_review(item_id: str, body: AutoReviewDecisionRequest):
         prediction = item["prediction"]
         suggestion = item["suggestion"]
         record = {
-            "id": f"pattern-decision-{len(PATTERN_DECISIONS) + 1}",
+            "id": f"pattern-decision-{uuid4().hex[:12]}",
             "pattern_id": item["pattern_id"],
             "decision": prediction["decision"],
             "reviewer": body.reviewer or "Learning System",
