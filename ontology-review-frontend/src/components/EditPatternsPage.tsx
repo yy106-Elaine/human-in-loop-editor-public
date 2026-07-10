@@ -389,10 +389,13 @@ export function EditPatternsPage({
     return activeCategory?.suggestions ?? [];
   }, [isAll, categories, activeCategory]);
 
-  // Set of pattern_ids that already have a human/AI decision.
+  // Set of pattern_ids the CURRENT USER has already decided. Unfinished is
+  // per-reviewer: a teammate's decision doesn't clear an item from your own
+  // unfinished list — everyone reviews independently and conflicts surface
+  // disagreements.
   const decidedIds = useMemo(
-    () => new Set(decisions.map((d) => d.pattern_id)),
-    [decisions]
+    () => new Set(decisions.filter((d) => d.reviewer === currentUser).map((d) => d.pattern_id)),
+    [decisions, currentUser]
   );
 
   // Unfinished view should hide anything already decided.
