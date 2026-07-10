@@ -259,12 +259,7 @@ def _wordnet_definition(code: str | None) -> str:
         synset = wn.synset(code)
     except Exception:
         return f"No WordNet entry found for '{code}'."
-    definition = synset.definition()
-    examples = synset.examples()
-    if examples:
-        # append the first example sentence in quotes, like the school sample did
-        return f'{definition}: "{examples[0]}"'
-    return definition
+    return synset.definition()
 
 
 def _find_parents(node_id: str) -> list[str]:

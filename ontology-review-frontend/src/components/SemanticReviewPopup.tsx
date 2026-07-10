@@ -34,7 +34,7 @@ export function SemanticReviewPopup({
   const [wordnet, setWordnet] = useState<{ definition: string; synonyms: string[] } | null>(null);
   useEffect(() => {
     setWordnet(null);
-    const code = synsetId || info?.synsetId;
+    const code = synsetId;
     if (!code || !/\.[nvasr]\.\d+$/.test(code)) return; // only real synset codes
     let cancelled = false;
     getWordnetInfo(code)
