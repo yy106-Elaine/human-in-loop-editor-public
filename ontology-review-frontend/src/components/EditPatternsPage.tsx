@@ -189,6 +189,7 @@ export function EditPatternsPage({
   const [conflicts, setConflicts] = useState<CollaborationConflict[]>([]);
   const [promptEditorFor, setPromptEditorFor] = useState<PatternType | null>(null);
   const [principles, setPrinciples] = useState<PrincipleOption[]>([]);
+  const [finishedFilter, setFinishedFilter] = useState<"all" | "mine">("all");
 
   async function loadPrinciples() {
     if (activeKey === ALL_KEY) return;
@@ -436,6 +437,24 @@ export function EditPatternsPage({
     }
     return Array.from(latestByKey.values());
   }, [categoryDecisions]);
+
+  // How many of the (deduped) finished decisions belong to the current user.
+  const mineFinishedCount = useMemo(
+    () => relevantDecisions.filter((d) => d.reviewer === currentUser).length,
+    [relevantDecisions, currentUser]
+  );
+
+  // The Finished list: filtered by All/Mine, then sorted newest-first.
+  const finishedToShow = useMemo(() => {
+    const base =
+      finishedFilter === "mine"
+        ? relevantDecisions.filter((d) => d.reviewer === currentUser)
+        : relevantDecisions;
+    return [...base].sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+  }, [relevantDecisions, finishedFilter, currentUser]);
 
   // Unfinished = suggestions actually loaded that have no decision yet.
   // (Matches the filtered list exactly, so the tab count and the list agree.)
@@ -717,13 +736,44 @@ export function EditPatternsPage({
                       Decisions already made on the suggestions above.
                     </p>
 
+                    {relevantDecisions.length > 0 && (
+                      <div className="mt-3 flex items-center gap-3">
+                        <div className="inline-flex items-center gap-1 rounded-lg bg-gray-100 p-1 shrink-0">
+                          {([
+                            ["all", `All (${relevantDecisions.length})`],
+                            ["mine", `Mine (${mineFinishedCount})`],
+                          ] as const).map(([key, label]) => (
+                            <button
+                              key={key}
+                              onClick={() => setFinishedFilter(key)}
+                              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                                finishedFilter === key
+                                  ? "bg-white text-gray-900 shadow-sm"
+                                  : "text-gray-600 hover:text-gray-900"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-xs text-gray-400">
+                          Showing {finishedToShow.length} of {relevantDecisions.length}
+                          {finishedFilter === "mine" ? " · your decisions" : ""} · newest first
+                        </p>
+                      </div>
+                    )}
+
                     {relevantDecisions.length === 0 ? (
                       <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
                         No finished changes yet.
                       </div>
+                    ) : finishedToShow.length === 0 ? (
+                      <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">
+                        You haven't made any decisions in this category yet.
+                      </div>
                     ) : (
                       <div className="mt-4 space-y-2">
-                        {[...relevantDecisions].reverse().map((d) => (
+                        {finishedToShow.map((d) => (
                           <FinishedChangeRow
                             key={d.id}
                             change={d}
