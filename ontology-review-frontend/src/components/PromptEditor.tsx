@@ -86,6 +86,9 @@ export function PromptEditor({
       setUserText(res.prompt.user);
       setDirty(false);
       setStatus("Saved. Run a small batch to regenerate suggestions with this prompt.");
+      // Prompt version changed -> refresh the list so stale "re-run ·
+      // current prompt" badges (from the previous version) clear instantly.
+      await onBatchComplete?.();
     } catch (err) {
       console.error(err);
       setStatus("Could not save the prompt.");
@@ -156,6 +159,8 @@ export function PromptEditor({
       setUserText(res.prompt.user);
       setDirty(false);
       setStatus("Saved learned prompt. Next, run a small batch to test it before running all.");
+      // Prompt version changed -> refresh so stale badges clear instantly.
+      await onBatchComplete?.();
     } catch (err) {
       console.error(err);
       setStatus("Could not save the learned prompt.");
