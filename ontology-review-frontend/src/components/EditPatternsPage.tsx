@@ -25,16 +25,8 @@ import {
   getPrinciples,
   resolveConflict,
   rerunNode,
-  getLearningStatus,
-  getLearnedRules,
-  trainLearningModel,
-  getAutoReviewItems,
-  decideAutoReviewItem,
   undoEditPatternDecision,
-  type AutoReviewItem,
-  type LearnedRule,
   type CollaborationConflict,
-  type LearningModelSummary,
   type FinishedChange,
   type PatternCategory,
   type PatternCategorySummary,
@@ -548,7 +540,6 @@ export function EditPatternsPage({
               ["unfinished", `Unfinished${unfinishedCount ? ` (${unfinishedCount})` : ""}`],
               ["finished", `Finished${finishedCount ? ` (${finishedCount})` : ""}`],
               ["conflicts", `Conflicts${openConflicts.length ? ` (${openConflicts.length})` : ""}`],
-              ["learned", "Learned"],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -616,13 +607,6 @@ export function EditPatternsPage({
                 currentUser={currentUser}
                 isAdmin={isAdmin}
                 onResolved={refreshCurrentView}
-              />
-            ) : statusFilter === "learned" ? (
-              <LearnedSuggestionsPanel
-                currentUser={currentUser}
-                isAdmin={isAdmin}
-                activeCategory={isAll ? "all" : activeCategory?.key ?? "all"}
-                onApplied={refreshCurrentView}
               />
             ) : (
               <>
@@ -889,7 +873,7 @@ function SuggestionCard({
                 </span>
               </div>
               {node.path && (
-                <p className="text-xs text-gray-500 mt-1 truncate">
+                <p className="text-xs text-gray-500 mt-1 break-words">
                   {node.path}
                 </p>
               )}
@@ -1095,346 +1079,6 @@ function SuggestionCard({
   );
 }
 
-
-function describeRule(rule: LearnedRule): string {
-  const [patternType, action, confidenceBucket, nodeBucket] = rule.signature.split("|");
-
-  const conf =
-    confidenceBucket === "high"
-      ? "high-confidence"
-      : confidenceBucket === "medium"
-      ? "medium-confidence"
-      : "low-confidence";
-
-  const size =
-    nodeBucket === "single"
-      ? "a single node"
-      : nodeBucket === "few"
-      ? "a few nodes"
-      : "many nodes";
-
-  const verb =
-    rule.decision === "approve"
-      ? "approve the"
-      : rule.decision === "reject"
-      ? "reject the"
-      : "alter the";
-
-  return `When a ${conf} ${patternType} suggests "${action}" on ${size} → ${verb} ${action}.`;
-}
-
-function explainRule(rule: LearnedRule): string {
-  const counts = rule.counts ?? {};
-  const total = rule.support;
-  const winning = counts[rule.decision] ?? 0;
-  const pct = Math.round(rule.confidence * 100);
-
-  const breakdown = Object.entries(counts)
-    .map(([decision, n]) => `${n} ${decision}`)
-    .join(", ");
-
-  const agreement =
-    pct === 100
-      ? `all ${total} of those decisions agreed`
-      : `${winning} of ${total} agreed (${breakdown})`;
-
-  return `Learned because across ${total} matching human decision${
-    total === 1 ? "" : "s"
-  }, ${agreement} on "${rule.decision}". The system now applies this automatically to new suggestions with the same profile, while anything outside this profile still goes to a human.`;
-}
-
-function LearnedSuggestionsPanel({
-  currentUser,
-  isAdmin,
-  activeCategory,
-  onApplied,
-}: {
-  currentUser: string;
-  isAdmin: boolean;
-  activeCategory: PatternType | "all";
-  onApplied: () => void | Promise<void>;
-}) {
-  const [model, setModel] = useState<LearningModelSummary | null>(null);
-  const [items, setItems] = useState<AutoReviewItem[]>([]);
-  const [rules, setRules] = useState<LearnedRule[]>([]);
-  const [threshold, setThreshold] = useState(0.85);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("");
-
-  async function load() {
-    setLoading(true);
-    setStatus("");
-    try {
-      const [modelData, reviewData, rulesData] = await Promise.all([
-        getLearningStatus(),
-        getAutoReviewItems({
-          category: activeCategory,
-          threshold,
-          limit: 50,
-        }),
-        getLearnedRules(),
-      ]);
-
-      setModel(modelData.model);
-      setItems(reviewData.items ?? []);
-      setRules(rulesData.rules ?? []);
-    } catch (err) {
-      console.error(err);
-      setStatus("Could not load learned suggestions.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCategory]);
-
-  async function handleTrain() {
-    setLoading(true);
-    setStatus("");
-    try {
-      const data = await trainLearningModel({
-        reviewer: currentUser,
-        is_admin: isAdmin,
-      });
-      setModel(data.model);
-      const [reviewData, rulesData] = await Promise.all([
-        getAutoReviewItems({
-          category: activeCategory,
-          threshold,
-          limit: 50,
-        }),
-        getLearnedRules(),
-      ]);
-      setItems(reviewData.items ?? []);
-      setRules(rulesData.rules ?? []);
-      setStatus("Learning model retrained from human decisions.");
-    } catch (err) {
-      console.error(err);
-      setStatus("Could not train learning model.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleDecision(item: AutoReviewItem, approve: boolean) {
-    if (!isAdmin) {
-      setStatus("Only admins can approve learned auto-decisions.");
-      return;
-    }
-
-    setStatus("");
-    try {
-      await decideAutoReviewItem(item.id, {
-        reviewer: currentUser,
-        approve,
-        is_admin: isAdmin,
-        comment: approve
-          ? "Admin approved learned auto-decision."
-          : "Admin rejected learned auto-decision.",
-      });
-
-      await load();
-      await onApplied();
-    } catch (err) {
-      console.error(err);
-      setStatus("Could not update learned auto-review item.");
-    }
-  }
-
-  return (
-    <div>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900">
-            Learned Suggestions
-          </h3>
-          <p className="text-sm text-gray-600 mt-1">
-            The system learns from prior human decisions and proposes high-confidence auto-decisions for remaining suggestions.
-          </p>
-        </div>
-
-        <button
-          onClick={handleTrain}
-          disabled={loading}
-          className="shrink-0 inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50"
-        >
-          <RefreshCw size={15} />
-          {loading ? "Training..." : "Train from decisions"}
-        </button>
-      </div>
-
-      <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-xs text-gray-500">Training examples</p>
-          <p className="text-2xl font-semibold text-gray-900">
-            {model?.examples ?? 0}
-          </p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-xs text-gray-500">Learned rules</p>
-          <p className="text-2xl font-semibold text-gray-900">
-            {model?.rule_count ?? 0}
-          </p>
-        </div>
-
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <label className="text-xs text-gray-500">Auto threshold</label>
-          <div className="mt-2 flex items-center gap-2">
-            <input
-              type="number"
-              min={0}
-              max={1}
-              step={0.05}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-              className="w-24 px-2 py-1.5 border border-gray-300 rounded-md text-sm"
-            />
-            <button
-              onClick={load}
-              disabled={loading}
-              className="px-3 py-1.5 rounded-md border border-gray-300 bg-white text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {rules.length > 0 && (
-        <div className="mt-4 border border-gray-200 rounded-xl bg-white p-4">
-          <h4 className="text-sm font-semibold text-gray-900">
-            Rules the system learned from your decisions
-          </h4>
-          <p className="text-xs text-gray-500 mt-1">
-            Each rule is summarized from prior human decisions and applied automatically to matching suggestions.
-          </p>
-          <div className="mt-3 space-y-2">
-            {rules.map((rule) => (
-              <div
-                key={rule.signature}
-                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5"
-              >
-                <p className="text-sm text-gray-800">
-                  {describeRule(rule)}
-                </p>
-                <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
-                  {explainRule(rule)}
-                </p>
-                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                  <span className="px-1.5 py-0.5 rounded bg-white border border-gray-200 font-mono">
-                    {rule.signature}
-                  </span>
-                  <span>{Math.round(rule.confidence * 100)}% agreement</span>
-                  <span>·</span>
-                  <span>{rule.support} human decision{rule.support === 1 ? "" : "s"}</span>
-                  {rule.counts && (
-                    <span>
-                      ·{" "}
-                      {Object.entries(rule.counts)
-                        .map(([k, v]) => `${v} ${k}`)
-                        .join(", ")}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {!isAdmin && (
-        <p className="mt-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-          You can view learned suggestions, but only admins can approve auto-decisions.
-        </p>
-      )}
-
-      {status && (
-        <p className={`mt-4 text-sm ${
-          status.toLowerCase().includes("could not") || status.toLowerCase().includes("only admins")
-            ? "text-red-700 bg-red-50 border-red-200"
-            : "text-emerald-700 bg-emerald-50 border-emerald-200"
-        } border rounded-lg px-3 py-2`}>
-          {status}
-        </p>
-      )}
-
-      {loading && items.length === 0 ? (
-        <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
-          Loading learned suggestions...
-        </div>
-      ) : items.length === 0 ? (
-        <div className="mt-4 bg-white border border-dashed border-gray-300 rounded-xl p-8 text-center text-sm text-gray-500">
-          No high-confidence learned suggestions yet. Make more human decisions, then train the model.
-        </div>
-      ) : (
-        <div className="mt-4 space-y-3">
-          {items.map((item) => {
-            const colors = PATTERN_COLORS[item.suggestion.pattern_type] ?? DEFAULT_COLOR;
-            return (
-              <div
-                key={item.id}
-                className={`relative overflow-hidden border rounded-xl p-4 pl-5 ${colors.card}`}
-              >
-                <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${colors.bar}`} />
-
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h4 className="text-base font-semibold text-gray-900">
-                      {item.suggestion.title}
-                    </h4>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Learned decision:{" "}
-                      <span className="font-semibold text-gray-900">
-                        {item.prediction.decision}
-                      </span>{" "}
-                      ({Math.round(item.prediction.confidence * 100)}%)
-                    </p>
-                  </div>
-
-                  <span className="text-xs px-2 py-1 rounded-full bg-white border border-gray-200 text-gray-600">
-                    {item.prediction.source === "learned_rule" ? "learned rule" : "heuristic"}
-                  </span>
-                </div>
-
-                <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-                  {item.prediction.reason}
-                </p>
-
-                <p className="text-xs text-gray-500 mt-2">
-                  Original action: {item.suggestion.suggested_action}
-                </p>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => handleDecision(item, true)}
-                    disabled={!isAdmin}
-                    className="px-3 py-1.5 rounded-md bg-gray-900 text-white text-xs font-medium hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed"
-                  >
-                    Approve auto-decision
-                  </button>
-
-                  <button
-                    onClick={() => handleDecision(item, false)}
-                    disabled={!isAdmin}
-                    className="px-3 py-1.5 rounded-md border border-gray-300 bg-white text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Reject auto-decision
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
 function ConflictResolutionPanel({
   conflicts,
   currentUser,
@@ -1548,10 +1192,6 @@ function FinishedChangeRow({
     ? new Date(change.created_at).toLocaleString()
     : "";
 
-  const isLearned =
-    Boolean(change.payload?.learning_prediction) ||
-    Boolean(change.payload?.auto_review_id);
-
   const aiAction =
     (change.payload?.suggested_action as string | undefined) ?? null;
 
@@ -1582,22 +1222,11 @@ function FinishedChangeRow({
 
   return (
     <div
-      className={`border rounded-lg px-4 py-3 flex items-center justify-between gap-3 ${
-        isLearned ? "bg-indigo-50/60 border-indigo-200" : "bg-white border-gray-200"
-      }`}
+      className="border rounded-lg px-4 py-3 flex items-center justify-between gap-3 bg-white border-gray-200"
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-gray-900 truncate">{title}</p>
-          <span
-            className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${
-              isLearned
-                ? "bg-indigo-100 text-indigo-700"
-                : "bg-gray-100 text-gray-600"
-            }`}
-          >
-            {isLearned ? "AI learned" : "Human"}
-          </span>
         </div>
         <p className="text-xs text-gray-600 mt-1">
           {aiAction && (
@@ -1623,7 +1252,7 @@ function FinishedChangeRow({
           )}
         </p>
         <p className="text-xs text-gray-500 mt-0.5">
-          {isLearned ? `Learning System · approved by ${change.reviewer}` : change.reviewer}
+          {change.reviewer}
           {when && ` · ${when}`}
         </p>
       </div>

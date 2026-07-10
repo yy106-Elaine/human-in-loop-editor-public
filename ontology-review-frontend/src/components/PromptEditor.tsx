@@ -35,6 +35,7 @@ export function PromptEditor({
   const [saving, setSaving] = useState(false);
   const [learning, setLearning] = useState(false);
   const [runningBatch, setRunningBatch] = useState(false);
+  const [batchSize, setBatchSize] = useState(10);
   const [status, setStatus] = useState("");
   const [dirty, setDirty] = useState(false);
 
@@ -84,7 +85,7 @@ export function PromptEditor({
       setSystemText(res.prompt.system);
       setUserText(res.prompt.user);
       setDirty(false);
-      setStatus("Saved. Click ‘Run batch of 10’ to regenerate suggestions with this prompt.");
+      setStatus("Saved. Run a small batch to regenerate suggestions with this prompt.");
     } catch (err) {
       console.error(err);
       setStatus("Could not save the prompt.");
@@ -154,7 +155,7 @@ export function PromptEditor({
       setSystemText(res.prompt.system);
       setUserText(res.prompt.user);
       setDirty(false);
-      setStatus("Saved learned prompt. Next, run a batch of 10 to test it before running all.");
+      setStatus("Saved learned prompt. Next, run a small batch to test it before running all.");
     } catch (err) {
       console.error(err);
       setStatus("Could not save the learned prompt.");
@@ -171,10 +172,10 @@ export function PromptEditor({
       const res = await rerunBatchWithCurrentPrompt({
         edit_type: editType,
         reviewer: currentUser,
-        limit: 10,
+        limit: batchSize,
         run_all: runAll,
       });
-      setStatus(`${runAll ? "Run all" : "Batch of 10"} complete. Regenerated ${res.count} suggestion(s) with the current prompt.`);
+      setStatus(`${runAll ? "Run all" : `Batch of ${batchSize}`} complete. Regenerated ${res.count} suggestion(s) with the current prompt.`);
       await onBatchComplete?.();
     } catch (err) {
       console.error(err);
@@ -311,13 +312,28 @@ export function PromptEditor({
             >
               <RotateCcw size={14} /> Reset
             </button>
-            <button
-              onClick={() => runBatch(false)}
-              disabled={runningBatch || loading}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-100 text-gray-700 disabled:opacity-50"
-            >
-              <Play size={14} /> {runningBatch ? "Running..." : "Run batch of 10"}
-            </button>
+            <div className="inline-flex items-center gap-1.5">
+              <button
+                onClick={() => runBatch(false)}
+                disabled={runningBatch || loading}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white hover:bg-gray-100 text-gray-700 disabled:opacity-50"
+              >
+                <Play size={14} /> {runningBatch ? "Running..." : "Run batch of"}
+              </button>
+              <input
+                type="number"
+                min={1}
+                max={200}
+                value={batchSize}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setBatchSize(Number.isNaN(v) ? 1 : Math.max(1, Math.min(200, v)));
+                }}
+                disabled={runningBatch || loading}
+                className="w-16 px-2 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-gray-400 disabled:opacity-50"
+                title="Number of suggestions to re-run"
+              />
+            </div>
             <button
               onClick={() => runBatch(true)}
               disabled={runningBatch || loading || !isAdmin}

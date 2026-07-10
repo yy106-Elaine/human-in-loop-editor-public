@@ -141,3 +141,11 @@ export async function getNodeStatuses(): Promise<Record<string, string>> {
   if (!res.ok) return {};
   return res.json();
 }
+
+export async function getWordnetInfo(
+  code: string
+): Promise<{ code: string; definition: string; synonyms: string[] }> {
+  const res = await fetch(`${API_BASE}/wordnet/${encodeURIComponent(code)}`);
+  if (!res.ok) throw new Error("No WordNet entry");
+  return res.json();
+}

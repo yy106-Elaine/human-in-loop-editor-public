@@ -3,6 +3,15 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel
+from nltk.corpus import wordnet as wn
+# Ensure the NLTK wordnet corpus is available (Render's container starts
+# without it). Downloads once on first boot; no-op afterwards.
+import nltk
+try:
+    wn.ensure_loaded()
+except LookupError:
+    nltk.download("wordnet", quiet=True)
+    nltk.download("omw-1.4", quiet=True)
 from app.services.ai_suggestions import generate_ai_suggestions
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -1149,6 +1158,20 @@ def rerun_node(body: RerunNodeRequest):
             detail=f"Re-run did not produce a result for {cache_key}",
         )
     return {"ok": True, "cache_key": cache_key, "suggestion": match}
+
+@app.get("/wordnet/{code}")
+def wordnet_info(code: str):
+    """Live WordNet lookup by synset code: definition + synonyms (lemmas)."""
+    try:
+        synset = wn.synset(code)
+    except Exception:
+        raise HTTPException(status_code=404, detail=f"No WordNet entry for '{code}'")
+    definition = synset.definition()
+    examples = synset.examples()
+    if examples:
+        definition = f'{definition}: "{examples[0]}"'
+    synonyms = [l.name().replace("_", " ") for l in synset.lemmas()]
+    return {"code": code, "definition": definition, "synonyms": synonyms}
 
 @app.get("/edit-patterns/duplicates")
 def duplicate_edit_patterns():

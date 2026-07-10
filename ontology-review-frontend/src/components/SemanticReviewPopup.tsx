@@ -1,5 +1,7 @@
 // src/components/SemanticReviewPopup.tsx
+import { useEffect, useState } from "react";
 import { getSemanticInfo, findSemanticByLabel } from "../lib/semanticData";
+import { getWordnetInfo } from "../api/ontologyApi";
 
 interface SemanticReviewPopupProps {
   /** synset id, e.g. "hardware.n.03" — preferred lookup key */
@@ -27,6 +29,19 @@ export function SemanticReviewPopup({
     : label
     ? findSemanticByLabel(label)
     : null;
+
+  // Live WordNet lookup by synset code: definition + synonyms.
+  const [wordnet, setWordnet] = useState<{ definition: string; synonyms: string[] } | null>(null);
+  useEffect(() => {
+    setWordnet(null);
+    const code = synsetId || info?.synsetId;
+    if (!code || !/\.[nvasr]\.\d+$/.test(code)) return; // only real synset codes
+    let cancelled = false;
+    getWordnetInfo(code)
+      .then((d) => { if (!cancelled) setWordnet(d); })
+      .catch(() => {}); // fall back silently to nodes-data.json definition
+    return () => { cancelled = true; };
+  }, [synsetId, info?.synsetId]);
 
   // Ontology hierarchy path comes from the live tree (passed in), NOT from the
   // WordNet-style Path field in nodes-data.json. Split on the "→" separator.
@@ -67,14 +82,29 @@ export function SemanticReviewPopup({
               )}
             </div>
 
-            {/* WordNet Definition */}
+            {/* WordNet Definition — live from WordNet by synset, falling back
+                to the static nodes-data.json definition */}
             <section>
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
                 WordNet Definition
               </h4>
               <p className="text-sm leading-relaxed text-gray-800">
-                {info?.definition || "—"}
+                {wordnet?.definition || info?.definition || "—"}
               </p>
+            </section>
+
+            {/* Synonyms — from the WordNet synset's lemmas */}
+            <section>
+              <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Synonyms
+              </h4>
+              {wordnet?.synonyms && wordnet.synonyms.length > 0 ? (
+                <p className="text-sm leading-relaxed text-gray-800">
+                  {wordnet.synonyms.join(", ")}
+                </p>
+              ) : (
+                <p className="text-sm text-gray-500">—</p>
+              )}
             </section>
 
             {/* Current Parent(s) — from the live ontology tree, always shown when available */}

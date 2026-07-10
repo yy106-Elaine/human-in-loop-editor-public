@@ -6,6 +6,15 @@ from supabase import create_client, Client as SupabaseClient
 
 load_dotenv()
 from nltk.corpus import wordnet as wn
+
+# Ensure the NLTK wordnet corpus exists (Render starts without it).
+# Downloads once on first boot; no-op when already present.
+import nltk
+try:
+    wn.ensure_loaded()
+except LookupError:
+    nltk.download("wordnet", quiet=True)
+    nltk.download("omw-1.4", quiet=True)
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
