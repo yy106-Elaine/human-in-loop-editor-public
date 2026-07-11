@@ -43,9 +43,12 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "\"renames\" array, one object per node that needs a new label, each "
             "with \"node_id\" and \"new_label\". new_label MUST be concrete and "
             "disambiguated (e.g. \"tract (anatomy)\"), never empty.\n"
-            "- If suggested_action is \"merge\": action_params SHOULD contain "
-            "\"merge_into\" set to the node_id you would keep; if truly identical "
-            "use an empty object {}.\n\n"
+            "- If suggested_action is \"merge\": action_params MUST contain "
+            "\"merge_into\" (the node_id you would keep) AND \"target_parent\" "
+            "(the label or synset id of the parent the merged node should live "
+            "under — usually the kept node's current parent; if the two nodes "
+            "have different parents, pick the one whose IS-A relation the "
+            "definition supports, and justify the choice in the rationale).\n\n"
             "Example for rename:\n"
             "{\n"
             '  "suggested_action": "rename",\n'
@@ -56,8 +59,8 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Example for merge:\n"
             "{\n"
             '  "suggested_action": "merge",\n'
-            '  "action_params": {"merge_into": "actor.n.01"},\n'
-            '  "rationale": "Both nodes have identical definitions.",\n'
+            '  "action_params": {"merge_into": "actor.n.01", "target_parent": "person"},\n'
+            '  "rationale": "Both nodes have identical definitions; the kept node\'s parent \'person\' is the correct IS-A home for the merged concept.",\n'
             '  "confidence": 1.0\n'
             "}"
         ),
@@ -171,21 +174,53 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
         "label": "Multiple Inheritance",
         "system": (
             "You are auditing a noun taxonomy for an ontology engineering project. "
-            "Decide whether the concept genuinely belongs under more than one parent "
-            "(e.g. 'school' is both an institution and a building, 'actor' could be "
-            "both a person and a performer-role). Use the DEFINITION and SUPERSENSES "
-            "to judge whether multiple distinct senses or facets are at play. "
-            "Be conservative: most nodes need only one parent.\n\n"
-            "Return STRICT JSON only, no markdown:\n"
+            "You are given ONE concept (a single WordNet synset) that appears in "
+            "MULTIPLE places in the taxonomy — i.e. it has more than one parent. "
+            "You see its label, synset, definition, and every path where it occurs.\n\n"
+            "Multiple inheritance is sometimes CORRECT: a concept can genuinely be "
+            "a subtype of two parents (e.g. 'tomato' under both fruit and "
+            "vegetable-as-food). It is INCORRECT when one of the placements is not "
+            "a true IS-A relation, or when the duplication is accidental.\n\n"
+            "Judge each occurrence by the DEFINITION: for every path, ask whether "
+            "the concept truly IS-A its parent there.\n\n"
+            "Decide ONE of:\n"
+            "- keep_both: every listed placement is a valid IS-A relation; the "
+            "multiple inheritance is legitimate and should stay.\n"
+            "- remove_from: at least one placement is wrong. You MUST say which.\n\n"
+            "IMPORTANT RULES:\n"
+            "- suggested_action MUST be EXACTLY \"keep_both\" or \"remove_from\". "
+            "Never output meta-advice like \"consider\" or \"review\" — deciding "
+            "is your job; give a concrete recommendation.\n"
+            "- If \"remove_from\": action_params MUST contain \"remove_parents\", "
+            "an array of the parent labels (or path fragments) the concept should "
+            "be DETACHED from, keeping the placement(s) whose IS-A relation the "
+            "definition supports.\n"
+            "- If \"keep_both\": action_params is an empty object {}.\n"
+            "- rationale MUST cite the definition and explain, per placement, why "
+            "it is or isn't a valid IS-A relation.\n"
+            "- confidence: 0.85+ only when the definition clearly settles it; "
+            "0.6-0.85 for judgment calls; below 0.6 when evidence is thin.\n\n"
+            "Return STRICT JSON only, no markdown, no comments. Keys: "
+            "suggested_action, action_params, rationale, confidence.\n\n"
+            "Example (legitimate multiple inheritance):\n"
             "{\n"
-            '  "suggested_action": "accept" | "add_parent",\n'
-            '  "rationale": "1-2 sentence explanation",\n'
-            '  "confidence": 0.0 to 1.0\n'
+            '  "suggested_action": "keep_both",\n'
+            '  "action_params": {},\n'
+            '  "rationale": "The definition supports both placements: it IS-A fruit botanically and IS-A vegetable in the food-preparation sense.",\n'
+            '  "confidence": 0.85\n'
+            "}\n\n"
+            "Example (one placement is wrong):\n"
+            "{\n"
+            '  "suggested_action": "remove_from",\n'
+            '  "action_params": {"remove_parents": ["Transfer between actors > Provide > Give"]},\n'
+            '  "rationale": "The definition describes a monetary award (a thing), which IS-A transferable object; the second path treats it as an act of giving, which the definition does not support.",\n'
+            '  "confidence": 0.75\n'
             "}"
         ),
         "user": (
-            "## Node and its current parent\n{candidate}\n\n"
-            "Analyze whether it needs multiple parents. Return STRICT JSON."
+            "## Concept with multiple parents\n{candidate}\n\n"
+            "Is this multiple inheritance legitimate? If not, name which "
+            "placement(s) to remove. Return STRICT JSON."
         ),
     },
     "naming": {

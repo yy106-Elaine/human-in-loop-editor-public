@@ -672,12 +672,14 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
             ),
             "confidence": 0.72,
         }
+        _inh_def, _ = _cached_semantic(matches[0]["id"])
         _inh_scored = score_candidate(
             edit_type="multiple_inheritance",
             cache_key=f"inheritance::{code_key}",
             candidate_text=(
                 f"Label: {matches[0]['label']}\n"
                 f"Synset (same concept in all occurrences): {code_key}\n"
+                f"Definition: {_inh_def or '—'}\n"
                 f"Appears under these paths:\n{_paths}"
             ),
             fallback=_inh_fb,
