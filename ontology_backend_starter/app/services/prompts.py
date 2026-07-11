@@ -109,32 +109,62 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
         "label": "Misplaced Nodes",
         "system": (
             "You are auditing a noun taxonomy for an ontology engineering project. "
-            "Determine whether the node is correctly placed under its parent via a "
-            "true IS-A relationship. If it is not, classify the error:\n\n"
-            "ERROR TYPES:\n"
-            "- TYPE_MISMATCH: the node belongs in a different sub-ontology entirely "
-            "(the four are Physical Entity, Information, Activity, Actor). "
-            "E.g. 'policy' belongs in Information, 'walking' in Activity.\n"
-            "- HIERARCHY_MISMATCH: the node is the right kind of thing but is not a "
-            "subtype of its current parent. E.g. 'engine' under 'vehicle' — an engine "
-            "is not a type of vehicle.\n"
-            "- GRANULARITY_ERROR: the node is too broad or too specific relative to "
-            "its parent/siblings and should sit at a different depth.\n\n"
-            "Use the DEFINITION, SUPERSENSES, PATH, and SIBLINGS to reason about "
-            "conceptual meaning, not just surface words. Be conservative: placements "
-            "are expected to be imperfect, so only flag clear errors. If the node could "
-            "reasonably be read as a subtype of the parent, return accept.\n\n"
-            "Return STRICT JSON only, no markdown:\n"
+            "You are given ONE node with its label, WordNet definition, O*NET task "
+            "examples, and its current path in the taxonomy. Decide whether the node "
+            "is correctly placed.\n\n"
+            "Judge by the DEFINITION first — never by the label alone. Many labels "
+            "sound like one category but their definition places them in another "
+            "(e.g. 'party' defined as 'an organization to gain political power' is an "
+            "ACTOR/organization, not an activity, even though parties can be events).\n\n"
+            "The taxonomy has four top-level subontologies: Physical, Information, "
+            "Actor, Activities. Below the top level, every parent-child edge must be "
+            "a true IS-A relation.\n\n"
+            "Decide ONE of:\n"
+            "- keep: the node's current placement is a correct IS-A chain. Use this "
+            "whenever the definition supports the current parent.\n"
+            "- move: the node belongs somewhere else. You MUST name the destination.\n"
+            "- rename: placement is fine but the label misleads about the sense; "
+            "give a clearer label.\n"
+            "- delete: the node is not a valid concept at all (rare; be conservative).\n\n"
+            "IMPORTANT RULES:\n"
+            "- suggested_action MUST be EXACTLY one of: \"keep\", \"move\", "
+            "\"rename\", \"delete\". Never invent values like \"review placement\" "
+            "or \"verify\" — reviewing is the human's job; your job is a concrete "
+            "recommendation.\n"
+            "- If suggested_action is \"move\": action_params MUST contain "
+            "\"target_parent\", the label or synset id of the parent it should sit "
+            "under, as specific as possible (e.g. \"organization\" or "
+            "\"organization.n.01\", not just a subontology name unless nothing more "
+            "specific fits).\n"
+            "- If suggested_action is \"rename\": action_params MUST contain "
+            "\"new_label\", concrete and disambiguated, never empty.\n"
+            "- If suggested_action is \"keep\" or \"delete\": action_params is an "
+            "empty object {}.\n"
+            "- rationale MUST cite the definition and/or O*NET examples as evidence.\n"
+            "- confidence reflects genuine uncertainty: 0.85+ only when the "
+            "definition is decisive; 0.6-0.85 for reasonable judgment calls; below "
+            "0.6 when evidence is thin.\n\n"
+            "Return STRICT JSON only, no markdown, no comments. Keys: "
+            "suggested_action, action_params, rationale, confidence.\n\n"
+            "Example (misclassified label):\n"
             "{\n"
-            '  "suggested_action": "accept" | "place_elsewhere",\n'
-            '  "error_type": "TYPE_MISMATCH" | "HIERARCHY_MISMATCH" | "GRANULARITY_ERROR" | "N/A",\n'
-            '  "rationale": "1-2 sentence explanation",\n'
-            '  "confidence": 0.0 to 1.0\n'
+            '  "suggested_action": "move",\n'
+            '  "action_params": {"target_parent": "organization"},\n'
+            '  "rationale": "The definition \'an organization to gain political power\' and the O*NET examples about advising political parties describe an organization (an actor), not an activity.",\n'
+            '  "confidence": 0.9\n'
+            "}\n\n"
+            "Example (placement is actually fine):\n"
+            "{\n"
+            '  "suggested_action": "keep",\n'
+            '  "action_params": {},\n'
+            '  "rationale": "The definition describes a physical structure, matching its current parent under Physical > artifact.",\n'
+            '  "confidence": 0.85\n'
             "}"
         ),
         "user": (
-            "## Node being audited (with its parent and siblings)\n{candidate}\n\n"
-            "Analyze the IS-A relationship and return your decision as STRICT JSON."
+            "## Node under review\n{candidate}\n\n"
+            "Is this node correctly placed? Judge by its definition, not its label. "
+            "Return your decision as STRICT JSON."
         ),
     },
     "multiple_inheritance": {
@@ -159,26 +189,52 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
         ),
     },
     "naming": {
-        "label": "Naming",
+        "label": "Naming / Disambiguation",
         "system": (
             "You are auditing a noun taxonomy for an ontology engineering project. "
-            "Decide whether the node's label is clear in context, or AMBIGUOUS such "
-            "that a clearer, disambiguated label would help reviewers. A good "
-            "disambiguated label preserves scope and avoids overlap with siblings. "
-            "E.g. 'window' might become 'window (architectural)' vs 'window (UI)'. "
-            "Be conservative: only suggest renaming when the label is genuinely "
-            "ambiguous given its definition and siblings.\n\n"
-            "Return STRICT JSON only, no markdown:\n"
+            "You are given ONE node whose label may be vague, ambiguous, virtual, or "
+            "missing a synset, along with its WordNet definition and path.\n\n"
+            "Your job is to propose the ACTUAL new label when one is needed — never "
+            "to tell the human to 'clarify' or 'disambiguate' (they know that; they "
+            "need your concrete suggestion).\n\n"
+            "Decide ONE of:\n"
+            "- rename: the label is vague/ambiguous in this position; provide a "
+            "concrete clearer label. Good renames add the distinguishing sense in "
+            "parentheses or pick a more specific word, e.g. \"part\" under anatomy "
+            "-> \"body part\"; \"tract\" -> \"tract (anatomy)\"; a [virtual] grouper "
+            "named \"structure\" -> \"structural component\".\n"
+            "- keep: the label is already clear enough in context (common for "
+            "well-known terms whose path disambiguates them). Be honest — do not "
+            "invent renames for labels that are fine.\n\n"
+            "IMPORTANT RULES:\n"
+            "- suggested_action MUST be EXACTLY \"rename\" or \"keep\".\n"
+            "- If \"rename\": action_params MUST contain \"new_label\", concrete "
+            "and specific, never empty, never a meta-instruction.\n"
+            "- If \"keep\": action_params is {}.\n"
+            "- rationale must say WHY the current label is or isn't clear, citing "
+            "the definition or path.\n"
+            "- confidence: 0.85+ only when the ambiguity (or clarity) is obvious.\n\n"
+            "Return STRICT JSON only, no markdown, no comments. Keys: "
+            "suggested_action, action_params, rationale, confidence.\n\n"
+            "Example:\n"
             "{\n"
-            '  "suggested_action": "accept" | "rename",\n'
-            '  "rationale": "1-2 sentence explanation",\n'
-            '  "title_suggestion": "suggested clearer label, or empty if accept",\n'
-            '  "confidence": 0.0 to 1.0\n'
+            '  "suggested_action": "rename",\n'
+            '  "action_params": {"new_label": "tract (anatomy)"},\n'
+            '  "rationale": "Under the anatomy subtree, bare \'tract\' is ambiguous with land tracts; the definition refers to a system of body organs.",\n'
+            '  "confidence": 0.85\n'
+            "}\n\n"
+            "Example:\n"
+            "{\n"
+            '  "suggested_action": "keep",\n'
+            '  "action_params": {},\n'
+            '  "rationale": "The path already disambiguates this common term and the definition matches its position.",\n'
+            '  "confidence": 0.8\n'
             "}"
         ),
         "user": (
-            "## Node being reviewed (with definition and siblings)\n{candidate}\n\n"
-            "Analyze the label clarity and return your decision as STRICT JSON."
+            "## Node under review\n{candidate}\n\n"
+            "Should this node be renamed? If yes, propose the exact new label. "
+            "Return STRICT JSON."
         ),
     },
 }
