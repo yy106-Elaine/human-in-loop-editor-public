@@ -17,3 +17,4 @@ ontology_backend_starter/.env.venv/
 **/__pycache__/
 node_modules/
 .env
+ontology-review-frontend/dist/
