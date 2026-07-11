@@ -693,7 +693,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
     return {
         "pattern_type": "inheritance",
         "count": len(suggestions),
-        "suggestions": suggestions[:25],
+        "suggestions": suggestions,
     }
 
 
