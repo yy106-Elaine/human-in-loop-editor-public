@@ -627,22 +627,19 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
     groups: Dict[str, List[Dict[str, Any]]] = {}
 
     for row in rows:
-        label = _norm_pattern_label(row.get("label", ""))
-        if not label:
-            continue
-        groups.setdefault(label, []).append(row)
+        code_key = (row.get("code") or "").strip()
+        if not code_key:
+            continue  # no synset -> cannot be multiply inherited
+        groups.setdefault(code_key, []).append(row)
 
     suggestions: List[Dict[str, Any]] = []
 
-    for label, matches in groups.items():
+    for code_key, matches in groups.items():
         if len(matches) < 2:
             continue
 
         top_categories = sorted({_top_category(row) for row in matches})
         synsets = sorted({row.get("code") for row in matches if row.get("code")})
-
-        if len(top_categories) < 2:
-            continue
 
         _paths = "\n".join(
             f"- {r['label']} ({r.get('code') or 'no synset'}): {r.get('path_string','')}"
@@ -659,13 +656,17 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
         }
         _inh_scored = score_candidate(
             edit_type="multiple_inheritance",
-            cache_key=f"inheritance::{label}",
-            candidate_text=f"Label: {matches[0]['label']}\nAppears under these paths:\n{_paths}",
+            cache_key=f"inheritance::{code_key}",
+            candidate_text=(
+                f"Label: {matches[0]['label']}\n"
+                f"Synset (same concept in all occurrences): {code_key}\n"
+                f"Appears under these paths:\n{_paths}"
+            ),
             fallback=_inh_fb,
         )
         suggestions.append(
             {
-                "id": f"inheritance::{label}",
+                "id": f"inheritance::{code_key}",
                 "pattern_type": "inheritance",
                 "rerun_with_current_prompt": _rerun_with_current_prompt(_inh_scored, "inheritance"),
                 "label": matches[0]["label"],
@@ -753,14 +754,24 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
                 ),
                 "confidence": 0.64,
             }
+            # Full semantic profile: definition + O*NET examples are what
+            # disambiguate cases like 'party' (political org => actor).
+            try:
+                _sem = get_semantic_review(row["id"])
+                _sem_def = _sem.wordnet_definition
+                _sem_onet = _sem.onet_task_examples
+            except Exception:
+                _sem_def, _sem_onet = None, None
             _mis_scored = score_candidate(
                 edit_type="misplaced",
                 cache_key=f"misplaced::{row['id']}",
                 candidate_text=(
                     f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
+                    f"Definition: {_sem_def or '—'}\n"
+                    f"O*NET task examples: {'; '.join(_sem_onet or []) or '—'}\n"
                     f"Current path: {path_string}\n"
                     f"Current top category: {top}\n"
-                    f"Heuristic suggests it may belong under: {suggested_parent}"
+                    f"Weak heuristic hint (label wordlist only): may belong under {suggested_parent}"
                 ),
                 fallback=_mis_fb,
             )
@@ -844,11 +855,16 @@ def _detect_naming_patterns() -> Dict[str, Any]:
             ),
             "confidence": min(confidence, 0.88),
         }
+        try:
+            _sem_def = get_semantic_review(row["id"]).wordnet_definition
+        except Exception:
+            _sem_def = None
         _nam_scored = score_candidate(
             edit_type="naming",
             cache_key=f"naming::{row['id']}",
             candidate_text=(
                 f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
+                f"Definition: {_sem_def or '—'}\n"
                 f"Path: {row.get('path_string','')}"
             ),
             fallback=_nam_fb,
