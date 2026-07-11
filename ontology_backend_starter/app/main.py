@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
-
+from functools import lru_cache
 from pydantic import BaseModel
 from nltk.corpus import wordnet as wn
 # Ensure the NLTK wordnet corpus is available (Render's container starts
@@ -65,6 +65,14 @@ app.add_middleware(
 def _startup_prime() -> None:
     """Warm in-memory state from Supabase so learning persists across restarts."""
     prime_pattern_decisions()
+    # Warm the semantic cache so the first counts request doesn't stall on
+    # ~900 cold WordNet lookups (slow on Render's small instance).
+    try:
+        _detect_naming_patterns()
+        _detect_misplaced_patterns()
+        print("[main] detector warmup complete")
+    except Exception as e:
+        print(f"[main] detector warmup failed: {e}")
 
 
 # In-memory MVP stores. These are safe for prototyping.
@@ -621,6 +629,16 @@ def _top_category(row: Dict[str, Any]) -> str:
     path = row.get("path") or []
     return path[0] if path else "Unknown"
 
+@lru_cache(maxsize=4096)
+def _cached_semantic(node_id: str):
+    """Memoized semantic lookup for detector candidate building.
+    Detectors re-run on every counts/category load; the underlying WordNet
+    lookups are pure and slow on small instances, so cache them."""
+    try:
+        s = get_semantic_review(node_id)
+        return (s.wordnet_definition, tuple(s.onet_task_examples or []))
+    except Exception:
+        return (None, ())
 
 def _detect_inheritance_patterns() -> Dict[str, Any]:
     rows = flatten_tree(ONTOLOGY_TREE)
@@ -756,12 +774,7 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
             }
             # Full semantic profile: definition + O*NET examples are what
             # disambiguate cases like 'party' (political org => actor).
-            try:
-                _sem = get_semantic_review(row["id"])
-                _sem_def = _sem.wordnet_definition
-                _sem_onet = _sem.onet_task_examples
-            except Exception:
-                _sem_def, _sem_onet = None, None
+            _sem_def, _sem_onet = _cached_semantic(row["id"])
             _mis_scored = score_candidate(
                 edit_type="misplaced",
                 cache_key=f"misplaced::{row['id']}",
@@ -855,10 +868,7 @@ def _detect_naming_patterns() -> Dict[str, Any]:
             ),
             "confidence": min(confidence, 0.88),
         }
-        try:
-            _sem_def = get_semantic_review(row["id"]).wordnet_definition
-        except Exception:
-            _sem_def = None
+        _sem_def, _ = _cached_semantic(row["id"])
         _nam_scored = score_candidate(
             edit_type="naming",
             cache_key=f"naming::{row['id']}",
