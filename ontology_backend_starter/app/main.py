@@ -904,6 +904,25 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
 
 MISPLACED_MODEL = "gpt-4o-mini"  # cheap model for the all-nodes scan
 
+def _has_number_prefix(label: str) -> bool:
+    """Artifact prefixes like '5. Misclassified' / '1. Name'."""
+    s = label.lstrip()
+    dot = s.find(". ")
+    return dot > 0 and s[:dot].isdigit()
+
+
+def _is_junk_for_misplaced(row: Dict[str, Any]) -> bool:
+    """Malformed nodes that shouldn't be scored as 'misplaced' — they are
+    already surfaced by the naming detector instead:
+      - no WordNet synset (row['code'] empty)
+      - artifact number prefix like '5. Name'
+    Runs before any LLM call, so filtering here is free."""
+    label = str(row.get("label") or "")
+    if _has_number_prefix(label):
+        return True
+    if not row.get("code"):   # 'no synset' — same test the naming detector uses
+        return True
+    return False
 
 def _misplaced_suggestion_for_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Score ONE node for misplacement. Returns a suggestion dict when the
@@ -912,6 +931,8 @@ def _misplaced_suggestion_for_row(row: Dict[str, Any]) -> Optional[Dict[str, Any
     path = row.get("path", [])
     if len(path) < 2:
         return None  # subontology roots can't be misplaced
+    if _is_junk_for_misplaced(row):
+        return None  # malformed node -> handled by the naming detector
 
     top = _top_category(row).lower()
     path_string = row.get("path_string", "")
@@ -986,9 +1007,9 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
     return {
         "pattern_type": "misplaced",
         "count": len(suggestions),
-        # cap the payload: 1000+ cards blow up the response; the UI pages
-        # via limit/offset anyway and re-runs re-score nodes directly.
-        "suggestions": suggestions[:100],
+        # Return all; the category endpoint paginates via limit/offset and
+        # the counts endpoint needs the true total for the badge.
+        "suggestions": suggestions,
     }
 
 _NAMING_VAGUE_LABELS = {
