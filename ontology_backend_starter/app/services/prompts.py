@@ -123,26 +123,27 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Actor, Activities. Below the top level, every parent-child edge must be "
             "a true IS-A relation.\n\n"
             "Decide ONE of:\n"
-            "- keep: the node's current placement is a correct IS-A chain. Use this "
-            "whenever the definition supports the current parent.\n"
-            "- move: the node belongs somewhere else. You MUST name the destination.\n"
+            "- accept: the node's current placement is a correct IS-A chain. Use "
+            "this whenever the definition supports the current parent.\n"
+            "- place_elsewhere: the node belongs somewhere else. You MUST name the "
+            "destination.\n"
             "- rename: placement is fine but the label misleads about the sense; "
             "give a clearer label.\n"
             "- delete: the node is not a valid concept at all (rare; be conservative).\n\n"
             "IMPORTANT RULES:\n"
-            "- suggested_action MUST be EXACTLY one of: \"keep\", \"move\", "
-            "\"rename\", \"delete\". Never invent values like \"review placement\" "
-            "or \"verify\" — reviewing is the human's job; your job is a concrete "
+            "- suggested_action MUST be EXACTLY one of: \"accept\", "
+            "\"place_elsewhere\", \"rename\", \"delete\". These match the reviewer's "
+            "action buttons. Never invent values like \"review placement\" or "
+            "\"verify\" — reviewing is the human's job; your job is a concrete "
             "recommendation.\n"
-            "- If suggested_action is \"move\": action_params MUST contain "
-            "\"target_parent\", the label or synset id of the parent it should sit "
-            "under, as specific as possible (e.g. \"organization\" or "
+            "- If suggested_action is \"place_elsewhere\": action_params MUST "
+            "contain \"target_parent\", the label or synset id of the parent it "
+            "should sit under, as specific as possible (e.g. \"organization\" or "
             "\"organization.n.01\", not just a subontology name unless nothing more "
             "specific fits).\n"
             "- If suggested_action is \"rename\": action_params MUST contain "
             "\"new_label\", concrete and disambiguated, never empty.\n"
-            "- If suggested_action is \"keep\" or \"delete\": action_params is an "
-            "empty object {}.\n"
+            "- If suggested_action is \"accept\" or \"delete\": use an empty object {}.\n"
             "- rationale MUST cite the definition and/or O*NET examples as evidence.\n"
             "- confidence reflects genuine uncertainty: 0.85+ only when the "
             "definition is decisive; 0.6-0.85 for reasonable judgment calls; below "
@@ -151,14 +152,14 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "suggested_action, action_params, rationale, confidence.\n\n"
             "Example (misclassified label):\n"
             "{\n"
-            '  "suggested_action": "move",\n'
+            '  "suggested_action": "place_elsewhere",\n'
             '  "action_params": {"target_parent": "organization"},\n'
             '  "rationale": "The definition \'an organization to gain political power\' and the O*NET examples about advising political parties describe an organization (an actor), not an activity.",\n'
             '  "confidence": 0.9\n'
             "}\n\n"
             "Example (placement is actually fine):\n"
             "{\n"
-            '  "suggested_action": "keep",\n'
+            '  "suggested_action": "accept",\n'
             '  "action_params": {},\n'
             '  "rationale": "The definition describes a physical structure, matching its current parent under Physical > artifact.",\n'
             '  "confidence": 0.85\n'
@@ -184,18 +185,20 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Judge each occurrence by the DEFINITION: for every path, ask whether "
             "the concept truly IS-A its parent there.\n\n"
             "Decide ONE of:\n"
-            "- keep_both: every listed placement is a valid IS-A relation; the "
+            "- accept: every listed placement is a valid IS-A relation; the "
             "multiple inheritance is legitimate and should stay.\n"
-            "- remove_from: at least one placement is wrong. You MUST say which.\n\n"
+            "- delete: at least one placement is wrong and the concept should be "
+            "DETACHED from that parent (the node itself is kept in its valid "
+            "location(s)). You MUST say which parent(s) to detach from.\n\n"
             "IMPORTANT RULES:\n"
-            "- suggested_action MUST be EXACTLY \"keep_both\" or \"remove_from\". "
-            "Never output meta-advice like \"consider\" or \"review\" — deciding "
-            "is your job; give a concrete recommendation.\n"
-            "- If \"remove_from\": action_params MUST contain \"remove_parents\", "
-            "an array of the parent labels (or path fragments) the concept should "
-            "be DETACHED from, keeping the placement(s) whose IS-A relation the "
-            "definition supports.\n"
-            "- If \"keep_both\": action_params is an empty object {}.\n"
+            "- suggested_action MUST be EXACTLY \"accept\" or \"delete\". These "
+            "match the reviewer's action buttons. Never output meta-advice like "
+            "\"consider\" or \"review\" — deciding is your job.\n"
+            "- If \"delete\": action_params MUST contain \"remove_parents\", an "
+            "array naming each parent to detach from, each entry as "
+            "\"detach from parent <label> (<synset or path fragment>)\", keeping "
+            "the placement(s) whose IS-A relation the definition supports.\n"
+            "- If \"accept\": action_params is an empty object {}.\n"
             "- rationale MUST cite the definition and explain, per placement, why "
             "it is or isn't a valid IS-A relation.\n"
             "- confidence: 0.85+ only when the definition clearly settles it; "
@@ -204,23 +207,23 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "suggested_action, action_params, rationale, confidence.\n\n"
             "Example (legitimate multiple inheritance):\n"
             "{\n"
-            '  "suggested_action": "keep_both",\n'
+            '  "suggested_action": "accept",\n'
             '  "action_params": {},\n'
             '  "rationale": "The definition supports both placements: it IS-A fruit botanically and IS-A vegetable in the food-preparation sense.",\n'
             '  "confidence": 0.85\n'
             "}\n\n"
             "Example (one placement is wrong):\n"
             "{\n"
-            '  "suggested_action": "remove_from",\n'
-            '  "action_params": {"remove_parents": ["Transfer between actors > Provide > Give"]},\n'
-            '  "rationale": "The definition describes a monetary award (a thing), which IS-A transferable object; the second path treats it as an act of giving, which the definition does not support.",\n'
+            '  "suggested_action": "delete",\n'
+            '  "action_params": {"remove_parents": ["detach from parent Give (Transfer between actors > Provide > Give)"]},\n'
+            '  "rationale": "The definition describes a monetary award (a thing), which IS-A transferable object; the placement under the act of giving is not a valid IS-A relation.",\n'
             '  "confidence": 0.75\n'
             "}"
         ),
         "user": (
             "## Concept with multiple parents\n{candidate}\n\n"
-            "Is this multiple inheritance legitimate? If not, name which "
-            "placement(s) to remove. Return STRICT JSON."
+            "Is this multiple inheritance legitimate? If not, name which parent(s) "
+            "to detach from. Return STRICT JSON."
         ),
     },
     "naming": {
@@ -238,14 +241,15 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "parentheses or pick a more specific word, e.g. \"part\" under anatomy "
             "-> \"body part\"; \"tract\" -> \"tract (anatomy)\"; a [virtual] grouper "
             "named \"structure\" -> \"structural component\".\n"
-            "- keep: the label is already clear enough in context (common for "
+            "- accept: the label is already clear enough in context (common for "
             "well-known terms whose path disambiguates them). Be honest — do not "
             "invent renames for labels that are fine.\n\n"
             "IMPORTANT RULES:\n"
-            "- suggested_action MUST be EXACTLY \"rename\" or \"keep\".\n"
+            "- suggested_action MUST be EXACTLY \"rename\" or \"accept\". These "
+            "match the reviewer's action buttons.\n"
             "- If \"rename\": action_params MUST contain \"new_label\", concrete "
             "and specific, never empty, never a meta-instruction.\n"
-            "- If \"keep\": action_params is {}.\n"
+            "- If \"accept\": action_params is {}.\n"
             "- rationale must say WHY the current label is or isn't clear, citing "
             "the definition or path.\n"
             "- confidence: 0.85+ only when the ambiguity (or clarity) is obvious.\n\n"
@@ -260,7 +264,7 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "}\n\n"
             "Example:\n"
             "{\n"
-            '  "suggested_action": "keep",\n'
+            '  "suggested_action": "accept",\n'
             '  "action_params": {},\n'
             '  "rationale": "The path already disambiguates this common term and the definition matches its position.",\n'
             '  "confidence": 0.8\n'
