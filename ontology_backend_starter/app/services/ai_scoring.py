@@ -28,10 +28,26 @@ def prime_cache(force: bool = False) -> None:
         _CACHE_PRIMED = True
         return
     try:
-        rows = sb.table("ai_scores").select("cache_key,result").execute()
-        for row in rows.data:
-            _CACHE[row["cache_key"]] = row["result"]
-        print(f"[ai_scoring] primed cache with {len(rows.data)} rows")
+        # Supabase caps a single select at 1000 rows; page through everything
+        # so cached scores (incl. the full misplacement scan) survive restarts.
+        total = 0
+        page_size = 1000
+        offset = 0
+        while True:
+            batch = (
+                sb.table("ai_scores")
+                .select("cache_key,result")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            data = batch.data or []
+            for row in data:
+                _CACHE[row["cache_key"]] = row["result"]
+            total += len(data)
+            if len(data) < page_size:
+                break
+            offset += page_size
+        print(f"[ai_scoring] primed cache with {total} rows")
     except Exception as e:
         print(f"[ai_scoring] prime_cache failed: {e}")
     _CACHE_PRIMED = True
@@ -112,6 +128,7 @@ def score_candidate(
     candidate_text: str,
     fallback: Dict[str, Any],
     force: bool = False,
+    model: str | None = None,
 ) -> Dict[str, Any]:
     """Score one candidate. Reads ONLY from the in-memory cache (primed once
     via prime_cache). Never queries Supabase per-key, so it can't trigger
@@ -136,7 +153,7 @@ def score_candidate(
         # braces (JSON examples), which would make .format() throw and silently
         # drop to the fallback.
         user = prompt["user"].replace("{candidate}", candidate_text)
-        raw = call_llm(prompt["system"], user)
+        raw = call_llm(prompt["system"], user, model=model)
         parsed = _parse_llm_json(raw)
         if parsed is not None:
             result = parsed

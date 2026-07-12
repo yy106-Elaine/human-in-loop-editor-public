@@ -717,109 +717,88 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
     }
 
 
+MISPLACED_MODEL = "gpt-4o-mini"  # cheap model for the all-nodes scan
+
+
+def _misplaced_suggestion_for_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Score ONE node for misplacement. Returns a suggestion dict when the
+    LLM (cached or live) recommends a change; None when the node is accepted,
+    unscored (fallback), or is a subontology root."""
+    path = row.get("path", [])
+    if len(path) < 2:
+        return None  # subontology roots can't be misplaced
+
+    top = _top_category(row).lower()
+    path_string = row.get("path_string", "")
+
+    _mis_fb = {
+        "suggested_action": "unscored",
+        "rationale": "Not yet scanned with the misplacement prompt.",
+        "confidence": 0.0,
+    }
+    _sem_def, _sem_onet = _cached_semantic(row["id"])
+    _mis_scored = score_candidate(
+        edit_type="misplaced",
+        cache_key=f"misplaced::{row['id']}",
+        candidate_text=(
+            f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
+            f"Definition: {_sem_def or '—'}\n"
+            f"O*NET task examples: {'; '.join(_sem_onet or []) or '—'}\n"
+            f"Current path: {path_string}\n"
+            f"Current top category: {top}\n"
+            f"Parent: {path[-2] if len(path) >= 2 else '—'}"
+        ),
+        fallback=_mis_fb,
+        model=MISPLACED_MODEL,
+    )
+
+    action = (_mis_scored.get("suggested_action") or "").lower()
+    # Only surface real, LLM-judged problems: skip unscored fallbacks and
+    # nodes the model accepted as correctly placed.
+    if action in ("unscored", "accept", ""):
+        return None
+
+    return {
+        "id": f"misplaced::{row['id']}",
+        "pattern_type": "misplaced",
+        "rerun_with_current_prompt": _rerun_with_current_prompt(_mis_scored, "misplaced"),
+        "node_id": row["id"],
+        "label": row["label"],
+        "code": row.get("code"),
+        "path": path_string,
+        "title": f"Possible misplaced node: {row['label']}",
+        "suggested_action": _mis_scored["suggested_action"],
+        "action_params": _mis_scored.get("action_params", {}),
+        "rationale": _mis_scored["rationale"],
+        "confidence": _mis_scored["confidence"],
+        "nodes": [
+            {
+                "id": row["id"],
+                "label": row["label"],
+                "code": row.get("code"),
+                "parent_label": path[-2] if len(path) >= 2 else None,
+                "path": path_string,
+            }
+        ],
+    }
+
+
 def _detect_misplaced_patterns() -> Dict[str, Any]:
+    """All-nodes misplacement review. Every node is a candidate; the LLM
+    (via cached scores) decides which are actually misplaced. Unscanned
+    nodes and accepted placements produce no card."""
     rows = flatten_tree(ONTOLOGY_TREE)
     suggestions: List[Dict[str, Any]] = []
-
-    activity_like = {
-        "meeting",
-        "conference",
-        "convention",
-        "date",
-        "party",
-        "dinner",
-        "reception",
-    }
-    information_like = {
-        "record",
-        "document",
-        "paper",
-        "table",
-        "file",
-        "report",
-        "chart",
-        "map",
-    }
-    actor_like = {
-        "school",
-        "library",
-        "office",
-        "institution",
-        "government",
-        "company",
-        "staff",
-    }
-
     for row in rows:
-        label = _norm_pattern_label(row.get("label", ""))
-        top = _top_category(row).lower()
-        path_string = row.get("path_string", "")
+        s = _misplaced_suggestion_for_row(row)
+        if s is not None:
+            suggestions.append(s)
 
-        suggested_parent = None
-
-        if label in activity_like and "activit" not in top:
-            suggested_parent = "Activities"
-        elif label in information_like and "information" not in top:
-            suggested_parent = "Information"
-        elif label in actor_like and "actor" not in top and "physical" in top:
-            suggested_parent = "Actor or multiple inheritance"
-
-        if suggested_parent:
-            _mis_fb = {
-                "suggested_action": f"review placement under {suggested_parent}",
-                "rationale": (
-                    f"The node appears under {top or 'an unclear category'}, but its label suggests "
-                    f"it may belong under {suggested_parent}. A human reviewer should verify whether "
-                    "this is a true IS-A relationship or a contextual use."
-                ),
-                "confidence": 0.64,
-            }
-            # Full semantic profile: definition + O*NET examples are what
-            # disambiguate cases like 'party' (political org => actor).
-            _sem_def, _sem_onet = _cached_semantic(row["id"])
-            _mis_scored = score_candidate(
-                edit_type="misplaced",
-                cache_key=f"misplaced::{row['id']}",
-                candidate_text=(
-                    f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
-                    f"Definition: {_sem_def or '—'}\n"
-                    f"O*NET task examples: {'; '.join(_sem_onet or []) or '—'}\n"
-                    f"Current path: {path_string}\n"
-                    f"Current top category: {top}\n"
-                    f"Weak heuristic hint (label wordlist only): may belong under {suggested_parent}"
-                ),
-                fallback=_mis_fb,
-            )
-            suggestions.append(
-                {
-                    "id": f"misplaced::{row['id']}",
-                    "pattern_type": "misplaced",
-                    "rerun_with_current_prompt": _rerun_with_current_prompt(_mis_scored, "misplaced"),
-                    "node_id": row["id"],
-                    "label": row["label"],
-                    "code": row.get("code"),
-                    "path": path_string,
-                    "title": f"Possible misplaced node: {row['label']}",
-                    "suggested_action": _mis_scored["suggested_action"],
-                    "action_params": _mis_scored.get("action_params", {}),
-                    "rationale": _mis_scored["rationale"],
-                    "confidence": _mis_scored["confidence"],
-                    "nodes": [
-                        {
-                            "id": row["id"],
-                            "label": row["label"],
-                            "code": row.get("code"),
-                            "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
-                            "path": path_string,
-                        }
-                    ],
-                }
-            )
-
+    suggestions.sort(key=lambda item: (-item["confidence"], item["label"]))
     return {
         "pattern_type": "misplaced",
         "count": len(suggestions),
-        "suggestions": suggestions[:25],
+        "suggestions": suggestions,
     }
 
 _NAMING_VAGUE_LABELS = {
@@ -1195,6 +1174,30 @@ def rerun_node(body: RerunNodeRequest):
             )
             if row is not None:
                 match = _naming_suggestion_for_row(row)
+        elif category == "misplaced":
+            # All-nodes misplacement review: re-score just this node with
+            # the misplacement prompt (mini model).
+            node_id = cache_key.split("::", 1)[1]
+            row = next(
+                (r for r in flatten_tree(ONTOLOGY_TREE) if r.get("id") == node_id),
+                None,
+            )
+            if row is not None:
+                match = _misplaced_suggestion_for_row(row)
+                if match is None:
+                    # Re-run judged it correctly placed — return a synthetic
+                    # accept card so the UI can show the outcome instead of 404.
+                    match = {
+                        "id": cache_key,
+                        "pattern_type": "misplaced",
+                        "node_id": node_id,
+                        "label": row.get("label", ""),
+                        "suggested_action": "accept",
+                        "action_params": {},
+                        "rationale": "Re-run judged this node correctly placed.",
+                        "confidence": 0.0,
+                        "nodes": [],
+                    }
         else:
             # Other categories key by something other than node.id
             # (e.g. duplicate::{label}), so fall back to the detector and
@@ -1341,6 +1344,33 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
         "message": f"Stored {decision} decision for {pattern_id}.",
         "record": record,
     }
+
+@app.post("/edit-patterns/misplaced/scan")
+def scan_all_misplaced(limit: int = 0):
+    """One-time full scan: score every node with the misplacement prompt
+    (gpt-4o-mini). Skips nodes already scanned (cached). limit=0 = all."""
+    import os
+    rows = flatten_tree(ONTOLOGY_TREE)
+    old_skip = os.environ.get("SKIP_LLM")
+    os.environ["SKIP_LLM"] = "false"
+    scanned = 0
+    try:
+        for row in rows:
+            if limit and scanned >= limit:
+                break
+            if len(row.get("path", [])) < 2:
+                continue
+            cache_key = f"misplaced::{row['id']}"
+            if cache_key in _CACHE:
+                continue  # already scanned; only pay for new nodes
+            _misplaced_suggestion_for_row(row)  # scores + caches
+            scanned += 1
+    finally:
+        if old_skip is None:
+            os.environ.pop("SKIP_LLM", None)
+        else:
+            os.environ["SKIP_LLM"] = old_skip
+    return {"ok": True, "scanned": scanned}
 
 @app.delete("/edit-patterns/{pattern_id:path}/decision")
 def undo_edit_pattern_decision(pattern_id: str, reviewer: str = ""):

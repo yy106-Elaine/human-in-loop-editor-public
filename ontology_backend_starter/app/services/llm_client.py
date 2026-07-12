@@ -30,7 +30,7 @@ def get_model() -> str:
     return os.getenv("OPENAI_MODEL", "gpt-4o")
 
 
-def call_llm(system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 1024) -> str:
+def call_llm(system: str, user: str, *, temperature: float = 0.2, max_tokens: int = 1024, model: str | None = None) -> str:
     """Send a system+user prompt to OpenAI, return the text response.
     Raises on hard API errors (caller decides how to fail soft).
 
