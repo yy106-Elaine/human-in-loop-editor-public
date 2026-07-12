@@ -132,7 +132,10 @@ def score_candidate(
     used_fallback = False
     try:
         prompt = get_prompt(edit_type)
-        user = prompt["user"].format(candidate=candidate_text)
+        # .replace instead of .format: user-edited prompts may contain literal
+        # braces (JSON examples), which would make .format() throw and silently
+        # drop to the fallback.
+        user = prompt["user"].replace("{candidate}", candidate_text)
         raw = call_llm(prompt["system"], user)
         parsed = _parse_llm_json(raw)
         if parsed is not None:
