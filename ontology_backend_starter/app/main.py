@@ -822,6 +822,71 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
         "suggestions": suggestions[:25],
     }
 
+_NAMING_VAGUE_LABELS = {
+    "thing", "entity", "object", "unit", "body", "part", "set", "group",
+    "system", "structure", "matter", "attribute", "process",
+}
+
+def _naming_suggestion_for_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the naming suggestion for ONE flattened row (used by both the
+    detector loop and single-node re-runs)."""
+    label_raw = row.get("label", "")
+    label = _norm_pattern_label(label_raw)
+    no_synset = not row.get("code")
+    vague = label in _NAMING_VAGUE_LABELS
+    virtual_marker = "[virtual]" in label_raw.lower()
+
+    confidence = 0.58
+    if no_synset:
+        confidence += 0.12
+    if vague:
+        confidence += 0.10
+    if virtual_marker:
+        confidence += 0.05
+
+    _nam_fb = {
+        "suggested_action": "clarify_label_or_add_disambiguation",
+        "rationale": (
+            "This node may need a clearer label or disambiguation because it is vague, virtual, "
+            "missing a synset, or formatted in a way that may hide the intended sense."
+        ),
+        "confidence": min(confidence, 0.88),
+    }
+    _sem_def, _ = _cached_semantic(row["id"])
+    _nam_scored = score_candidate(
+        edit_type="naming",
+        cache_key=f"naming::{row['id']}",
+        candidate_text=(
+            f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
+            f"Definition: {_sem_def or '—'}\n"
+            f"Path: {row.get('path_string','')}"
+        ),
+        fallback=_nam_fb,
+    )
+    return {
+        "id": f"naming::{row['id']}",
+        "pattern_type": "naming",
+        "rerun_with_current_prompt": _rerun_with_current_prompt(_nam_scored, "naming"),
+        "node_id": row["id"],
+        "label": row["label"],
+        "code": row.get("code"),
+        "path": row.get("path_string", ""),
+        "title": f"Naming review: {row['label']}",
+        "suggested_action": _nam_scored["suggested_action"],
+        "action_params": _nam_scored.get("action_params", {}),
+        "rationale": _nam_scored["rationale"],
+        "confidence": _nam_scored["confidence"],
+        "nodes": [
+            {
+                "id": row["id"],
+                "label": row["label"],
+                "code": row.get("code"),
+                "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
+                "path": row.get("path_string", ""),
+            }
+        ],
+    }
+
 _NAMING_FULL: List[Dict[str, Any]] = []
 def _detect_naming_patterns() -> Dict[str, Any]:
     rows = flatten_tree(ONTOLOGY_TREE)
@@ -854,58 +919,7 @@ def _detect_naming_patterns() -> Dict[str, Any]:
         if not (has_underscore or no_synset or vague or virtual_marker):
             continue
 
-        confidence = 0.58
-        if no_synset:
-            confidence += 0.12
-        if vague:
-            confidence += 0.10
-        if virtual_marker:
-            confidence += 0.05
-
-        _nam_fb = {
-            "suggested_action": "clarify_label_or_add_disambiguation",
-            "rationale": (
-                "This node may need a clearer label or disambiguation because it is vague, virtual, "
-                "missing a synset, or formatted in a way that may hide the intended sense."
-            ),
-            "confidence": min(confidence, 0.88),
-        }
-        _sem_def, _ = _cached_semantic(row["id"])
-        _nam_scored = score_candidate(
-            edit_type="naming",
-            cache_key=f"naming::{row['id']}",
-            candidate_text=(
-                f"Label: {row['label']} ({row.get('code') or 'no synset'})\n"
-                f"Definition: {_sem_def or '—'}\n"
-                f"Path: {row.get('path_string','')}"
-            ),
-            fallback=_nam_fb,
-        )
-        suggestions.append(
-            {
-                "id": f"naming::{row['id']}",
-                "pattern_type": "naming",
-                "rerun_with_current_prompt": _rerun_with_current_prompt(_nam_scored, "naming"),
-                "node_id": row["id"],
-                "label": row["label"],
-                "code": row.get("code"),
-                "path": row.get("path_string", ""),
-                "title": f"Naming review: {row['label']}",
-                "suggested_action": _nam_scored["suggested_action"],
-                "action_params": _nam_scored.get("action_params", {}),
-                "rationale": _nam_scored["rationale"],
-                "confidence": _nam_scored["confidence"],
-                "nodes": [
-                    {
-                        "id": row["id"],
-                        "label": row["label"],
-                        "code": row.get("code"),
-                        "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
-                        "path": row.get("path_string", ""),
-                    }
-                ],
-            }
-        )
+        suggestions.append(_naming_suggestion_for_row(row))
 
     suggestions.sort(key=lambda item: (-item["confidence"], item["label"]))
     global _NAMING_FULL
@@ -1172,14 +1186,15 @@ def rerun_node(body: RerunNodeRequest):
             if flat_node is not None:
                 match = _virtual_suggestion(flat_node)
         elif category == "naming":
-            # Naming has ~870 candidates truncated to 25 for the UI; match
-            # against the full (unsliced) list the detector keeps aside,
-            # otherwise nodes past the cap 404 on re-run.
-            _detect_category_patterns("naming")  # refresh; fills _NAMING_FULL
-            match = next(
-                (s for s in _NAMING_FULL if s.get("id") == cache_key),
+            # Re-score just this one node directly — re-running the whole
+            # 870-candidate detector made re-runs crawl.
+            node_id = cache_key.split("::", 1)[1]
+            row = next(
+                (r for r in flatten_tree(ONTOLOGY_TREE) if r.get("id") == node_id),
                 None,
             )
+            if row is not None:
+                match = _naming_suggestion_for_row(row)
         else:
             # Other categories key by something other than node.id
             # (e.g. duplicate::{label}), so fall back to the detector and
