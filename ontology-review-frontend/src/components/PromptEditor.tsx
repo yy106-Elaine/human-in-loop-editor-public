@@ -87,8 +87,9 @@ export function PromptEditor({
       setDirty(false);
       setStatus("Saved. Run a small batch to regenerate suggestions with this prompt.");
       // Prompt version changed -> refresh the list so stale "re-run ·
-      // current prompt" badges (from the previous version) clear instantly.
-      await onBatchComplete?.();
+      // current prompt" badges clear. Fire-and-forget: a slow refresh must
+      // not pin the button in "Saving..." or block the batch buttons.
+      void onBatchComplete?.();
     } catch (err) {
       console.error(err);
       setStatus("Could not save the prompt.");

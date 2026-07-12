@@ -314,11 +314,13 @@ def _resolve_existing_node_ref(value: Any) -> Optional[Dict[str, Any]]:
     return matches[0] if len(matches) == 1 else None
 
 
-def _valid_parent_options(row: Dict[str, Any], limit: int = 25) -> List[Dict[str, Any]]:
-    """Return real, nearby ontology nodes that the LLM may choose as parents."""
+@lru_cache(maxsize=4096)
+def _valid_parent_options_cached(current_id: str, current_top: str, limit: int = 25) -> tuple:
+    """Cached core of _valid_parent_options, keyed by (node id, top category).
+    Without this, every misplaced candidate re-filters and re-sorts all
+    ~3.3k rows on every request — slow enough on Render to hang the
+    post-save refresh and pin the Save/batch buttons."""
     rows = _ontology_reference_index()["rows"]
-    current_id = str(row.get("id") or "")
-    current_top = _top_category(row)
     candidates = [
         candidate for candidate in rows
         if candidate.get("id") != current_id
@@ -326,7 +328,12 @@ def _valid_parent_options(row: Dict[str, Any], limit: int = 25) -> List[Dict[str
         and _top_category(candidate) == current_top
     ]
     candidates.sort(key=lambda candidate: (len(candidate.get("path") or []), str(candidate.get("label") or "")))
-    return candidates[:limit]
+    return tuple(candidates[:limit])
+
+
+def _valid_parent_options(row: Dict[str, Any], limit: int = 25) -> List[Dict[str, Any]]:
+    """Return real, nearby ontology nodes that the LLM may choose as parents."""
+    return list(_valid_parent_options_cached(str(row.get("id") or ""), _top_category(row), limit))
 
 
 def _format_parent_options(row: Dict[str, Any], limit: int = 25) -> str:
