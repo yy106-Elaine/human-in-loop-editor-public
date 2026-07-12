@@ -1563,22 +1563,46 @@ def decide_edit_pattern(pattern_id: str, body: PatternDecisionRequest):
 
 @app.post("/edit-patterns/misplaced/scan")
 def scan_all_misplaced(limit: int = 0):
-    """One-time full scan: score every node with the misplacement prompt
-    (gpt-4o-mini). Skips nodes already scanned (cached). limit=0 = all."""
+    """One-time full scan: score every ELIGIBLE node with the misplacement
+    prompt (gpt-4o-mini). limit=0 = all.
+
+    Skips two kinds of node so the scan can actually terminate:
+      - already-scored nodes (cache hit), and
+      - junk/ineligible nodes (no synset / number-prefixed) that
+        _misplaced_suggestion_for_row itself skips BEFORE any LLM call and
+        therefore never caches. Without this second skip, those uncached
+        junk nodes were re-counted on every request, so `scanned` plateaued
+        at `limit` forever and never reached 0 (the infinite-scan bug).
+
+    Response counters let the caller verify completeness:
+      scanned         newly scored on this call
+      already_cached  eligible nodes already done before this call
+      remaining       eligible nodes still uncached after this call (limit hit)
+      eligible_total  total scoreable nodes in the ontology
+      done            True when nothing eligible is left to score
+    """
     import os
     rows = flatten_tree(ONTOLOGY_TREE)
     old_skip = os.environ.get("SKIP_LLM")
     os.environ["SKIP_LLM"] = "false"
     scanned = 0
+    already = 0
+    remaining = 0
+    eligible = 0
     try:
         for row in rows:
-            if limit and scanned >= limit:
-                break
             if len(row.get("path", [])) < 2:
-                continue
+                continue  # subontology roots can't be misplaced
+            if _is_junk_for_misplaced(row):
+                continue  # mirror the scorer's own guard; never cacheable
+            eligible += 1
             cache_key = f"misplaced::{row['id']}"
             if cache_key in _CACHE:
-                continue  # already scanned; only pay for new nodes
+                already += 1
+                continue  # already scored; only pay for new nodes
+            if limit and scanned >= limit:
+                remaining += 1  # keep counting to report true progress
+                continue
             _misplaced_suggestion_for_row(row)  # scores + caches
             scanned += 1
     finally:
@@ -1586,7 +1610,14 @@ def scan_all_misplaced(limit: int = 0):
             os.environ.pop("SKIP_LLM", None)
         else:
             os.environ["SKIP_LLM"] = old_skip
-    return {"ok": True, "scanned": scanned}
+    return {
+        "ok": True,
+        "scanned": scanned,
+        "already_cached": already,
+        "remaining": remaining,
+        "eligible_total": eligible,
+        "done": remaining == 0,
+    }
 
 @app.delete("/edit-patterns/{pattern_id:path}/decision")
 def undo_edit_pattern_decision(pattern_id: str, reviewer: str = ""):
