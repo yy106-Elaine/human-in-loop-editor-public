@@ -822,7 +822,7 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
         "suggestions": suggestions[:25],
     }
 
-
+_NAMING_FULL: List[Dict[str, Any]] = []
 def _detect_naming_patterns() -> Dict[str, Any]:
     rows = flatten_tree(ONTOLOGY_TREE)
     suggestions: List[Dict[str, Any]] = []
@@ -908,6 +908,8 @@ def _detect_naming_patterns() -> Dict[str, Any]:
         )
 
     suggestions.sort(key=lambda item: (-item["confidence"], item["label"]))
+    global _NAMING_FULL
+    _NAMING_FULL = suggestions
     return {
         "pattern_type": "naming",
         "count": len(suggestions),
@@ -1169,10 +1171,19 @@ def rerun_node(body: RerunNodeRequest):
             )
             if flat_node is not None:
                 match = _virtual_suggestion(flat_node)
+        elif category == "naming":
+            # Naming has ~870 candidates truncated to 25 for the UI; match
+            # against the full (unsliced) list the detector keeps aside,
+            # otherwise nodes past the cap 404 on re-run.
+            _detect_category_patterns("naming")  # refresh; fills _NAMING_FULL
+            match = next(
+                (s for s in _NAMING_FULL if s.get("id") == cache_key),
+                None,
+            )
         else:
             # Other categories key by something other than node.id
             # (e.g. duplicate::{label}), so fall back to the detector and
-            # match by id — but WITHOUT any pagination cap.
+            # match by id.
             detected = _detect_category_patterns(category)
             match = next(
                 (s for s in detected.get("suggestions", []) if s.get("id") == cache_key),

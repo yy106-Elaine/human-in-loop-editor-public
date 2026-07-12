@@ -98,6 +98,11 @@ function actionColor(action?: string): string {
 function describeActionParams(params: unknown): string | null {
   if (!params || typeof params !== "object") return null;
   const p = params as Record<string, unknown>;
+  if (Array.isArray(p.remove_parents) && p.remove_parents.length > 0) {
+    // Multiple inheritance "delete": show exactly which parent edge(s)
+    // to detach, e.g. "delete · detach from parent Give (...)"
+    return p.remove_parents.map((r) => String(r)).join("; ");
+  }
   if (Array.isArray(p.renames) && p.renames.length > 0) {
     return p.renames
       .map((r) => {
@@ -110,7 +115,12 @@ function describeActionParams(params: unknown): string | null {
     return `→ "${p.new_label}"`;
   }
   if (typeof p.merge_into === "string" && p.merge_into) {
-    return `merge into ${p.merge_into}`;
+    // Merge may also carry target_parent (where the merged node lives).
+    const parent =
+      typeof p.target_parent === "string" && p.target_parent
+        ? ` · under ${p.target_parent}`
+        : "";
+    return `merge into ${p.merge_into}${parent}`;
   }
   if (typeof p.target_parent === "string" && p.target_parent) {
     return `move under ${p.target_parent}`;
