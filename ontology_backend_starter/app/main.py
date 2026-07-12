@@ -986,7 +986,9 @@ def _detect_misplaced_patterns() -> Dict[str, Any]:
     return {
         "pattern_type": "misplaced",
         "count": len(suggestions),
-        "suggestions": suggestions,
+        # cap the payload: 1000+ cards blow up the response; the UI pages
+        # via limit/offset anyway and re-runs re-score nodes directly.
+        "suggestions": suggestions[:100],
     }
 
 _NAMING_VAGUE_LABELS = {
@@ -1844,21 +1846,21 @@ def learn_prompt_proposal(edit_type: str, body: PromptLearningRequest) -> Dict[s
 def rerun_batch(body: BatchRerunRequest):
     """Re-run a small batch or all cached AI scores for one edit type.
 
-    Batch mode defaults to 10 to control OpenAI cost. run_all should only be
-    used after prompt refinement looks good.
+    Re-scores each target individually (cache delete + direct re-score).
+    Never flips the global SKIP_LLM switch and never re-runs the whole
+    detector with the switch off — that combination silently full-scanned
+    every uncached node (3.3k real API calls) on each batch click.
     """
+    import os
     edit_type = body.edit_type
     category = _pattern_type_for_prompt(edit_type)
     if category not in PATTERN_CATEGORY_META:
         raise HTTPException(status_code=404, detail=f"Unknown edit type: {edit_type}")
 
-    # First collect current candidate ids without any OpenAI calls.
-    import os
+    # 1. Collect candidate ids WITHOUT any OpenAI calls (cache/fallback only).
     old_skip = os.environ.get("SKIP_LLM")
     os.environ["SKIP_LLM"] = "true"
     try:
-        # Re-run must be able to find ANY node, so bypass the UI's 75-item cap
-        # for virtual (the detector truncates by default for pagination).
         if category == "virtual":
             from app.services.edit_patterns import detect_virtual_node_patterns
             detected = detect_virtual_node_patterns(limit=None)
@@ -1873,6 +1875,7 @@ def rerun_batch(body: BatchRerunRequest):
     candidate_ids = [s.get("id") for s in detected.get("suggestions", []) if s.get("id")]
     target_ids = candidate_ids if body.run_all else candidate_ids[: max(1, min(body.limit, 50))]
 
+    # 2. Delete targets' cached scores (memory + Supabase).
     sb = _get_supabase()
     for cache_key in target_ids:
         _CACHE.pop(cache_key, None)
@@ -1882,23 +1885,42 @@ def rerun_batch(body: BatchRerunRequest):
             except Exception as e:
                 print(f"[main] could not delete old score for {cache_key}: {e}")
 
-    # Now rerun detector with current saved prompt. Only deleted cache keys call OpenAI.
+    # 3. Re-score ONLY the targets, one node at a time. SKIP_LLM stays
+    #    scoped to this loop: with the cache deleted, the single-node
+    #    scorers hit the LLM for exactly these keys.
+    results: List[Dict[str, Any]] = []
+    rows_by_id = {str(r.get("id")): r for r in flatten_tree(ONTOLOGY_TREE)}
     old_skip = os.environ.get("SKIP_LLM")
     os.environ["SKIP_LLM"] = "false"
     try:
-        refreshed = _detect_category_patterns(category)
+        for cache_key in target_ids:
+            node_id = cache_key.split("::", 1)[1] if "::" in cache_key else ""
+            s = None
+            if category == "misplaced":
+                row = rows_by_id.get(node_id)
+                if row is not None:
+                    s = _misplaced_suggestion_for_row(row)
+            elif category == "naming":
+                row = rows_by_id.get(node_id)
+                if row is not None:
+                    s = _naming_suggestion_for_row(row)
+            elif category == "virtual":
+                from app.services.edit_patterns import flatten_ontology, _virtual_suggestion
+                flat_node = next((n for n in flatten_ontology() if n.id == node_id), None)
+                if flat_node is not None:
+                    s = _virtual_suggestion(flat_node)
+            else:
+                # duplicate / inheritance are group-keyed; re-detect the
+                # category (their candidate sets are small) and pick the key.
+                det = _detect_category_patterns(category)
+                s = next((x for x in det.get("suggestions", []) if x.get("id") == cache_key), None)
+            if s is not None:
+                results.append(_validate_suggestion_action(s))
     finally:
         if old_skip is None:
             os.environ.pop("SKIP_LLM", None)
         else:
             os.environ["SKIP_LLM"] = old_skip
-
-    refreshed_map = {s.get("id"): s for s in refreshed.get("suggestions", [])}
-    results = [
-        _validate_suggestion_action(refreshed_map[k])
-        for k in target_ids
-        if k in refreshed_map
-    ]
 
     log_event(
         node_id=f"prompt::{edit_type}",
@@ -1906,9 +1928,7 @@ def rerun_batch(body: BatchRerunRequest):
         reviewer=body.reviewer,
         payload={"edit_type": edit_type, "run_all": body.run_all, "requested": len(target_ids), "refreshed": len(results)},
     )
-
     return {"ok": True, "edit_type": edit_type, "run_all": body.run_all, "count": len(results), "suggestions": results}
-
 
 @app.get("/prompts")
 def list_prompts() -> Dict[str, Any]:
