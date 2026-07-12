@@ -381,6 +381,18 @@ export function EditPatternsPage({
     }
   }
 
+  // Auto-search with debounce: typing filters after a pause, and clearing
+  // the box automatically restores the full list (previously you had to
+  // press Enter or reload the page).
+  useEffect(() => {
+    if (activeKey === ALL_KEY) return;
+    const t = setTimeout(() => {
+      handleSearch();
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
   const isAll = activeKey === ALL_KEY;
   const activeCategory = categories.find((c) => c.key === activeKey);
   const openConflicts = conflicts.filter((c) => c.status === "open");
@@ -620,6 +632,9 @@ export function EditPatternsPage({
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleSearch();
+              }}
+              onBlur={() => {
+                if (!query.trim()) handleSearch();
               }}
               placeholder={isAll ? "Select a category to search..." : "Search this category..."}
               disabled={isAll}
@@ -952,11 +967,11 @@ function SuggestionCard({
           </h4>
           <p className="text-sm text-gray-500 mt-1">
             Suggested action:{" "}
-            <span className={`font-semibold ${actionColor(suggestion.suggested_action)}`}>
-              {suggestion.suggested_action}
+            <span className={`font-semibold ${actionColor(shown.suggested_action)}`}>
+              {shown.suggested_action}
             </span>
             {(() => {
-              const desc = describeActionParams(suggestion.action_params);
+              const desc = describeActionParams(shown.action_params);
               return desc ? (
                 <span className="text-gray-600">{" · "}{desc}</span>
               ) : null;
@@ -967,13 +982,13 @@ function SuggestionCard({
         <div className="text-right shrink-0">
           <p className="text-xs text-gray-500">Confidence</p>
           <p className="text-lg font-semibold text-gray-900">
-            {Math.round(suggestion.confidence * 100)}%
+            {Math.round(shown.confidence * 100)}%
           </p>
         </div>
       </div>
 
       <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-        {suggestion.rationale}
+        {shown.rationale}
       </p>
 
       {suggestion.nodes && suggestion.nodes.length > 0 && (

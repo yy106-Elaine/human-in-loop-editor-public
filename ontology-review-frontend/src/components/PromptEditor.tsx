@@ -180,7 +180,7 @@ export function PromptEditor({
         limit: batchSize,
         run_all: runAll,
       });
-      setStatus(`${runAll ? "Run all" : `Batch of ${batchSize}`} complete. Regenerated ${res.count} suggestion(s) with the current prompt.`);
+      setStatus(`✓ ${runAll ? "Run all" : `Batch of ${batchSize}`} complete — regenerated ${res.count} suggestion(s) with the current prompt.`);
       await onBatchComplete?.();
     } catch (err) {
       console.error(err);
