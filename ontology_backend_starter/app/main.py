@@ -1272,7 +1272,11 @@ def edit_pattern_highlights():
 @app.get("/edit-patterns/category/{category}")
 def edit_pattern_category(
     category: str,
-    limit: int = Query(25, ge=1, le=100),
+    # Cap raised from 100 -> 5000. The misplaced category can legitimately
+    # return ~1000 cards, and the frontend currently requests limit=count in
+    # one shot; a le=100 cap made that request 422 ("Could not load"). This
+    # only affects validation — the response is served from cache, no OpenAI.
+    limit: int = Query(25, ge=1, le=5000),
     offset: int = Query(0, ge=0),
     q: str = "",
 ):
