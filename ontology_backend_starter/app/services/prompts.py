@@ -137,10 +137,10 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "\"verify\" — reviewing is the human's job; your job is a concrete "
             "recommendation.\n"
             "- If suggested_action is \"place_elsewhere\": action_params MUST "
-            "contain \"target_parent\", the label or synset id of the parent it "
-            "should sit under, as specific as possible (e.g. \"organization\" or "
-            "\"organization.n.01\", not just a subontology name unless nothing more "
-            "specific fits).\n"
+            "contain \"target_parent\" set to an exact node_id from the VALID "
+            "DESTINATION PARENTS list in the user prompt. Never invent a parent or "
+            "return a free-form label. If no listed parent is defensible, return "
+            "\"accept\" instead.\n"
             "- If suggested_action is \"rename\": action_params MUST contain "
             "\"new_label\", concrete and disambiguated, never empty.\n"
             "- If suggested_action is \"accept\" or \"delete\": use an empty object {}.\n"
@@ -153,7 +153,7 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Example (misclassified label):\n"
             "{\n"
             '  "suggested_action": "place_elsewhere",\n'
-            '  "action_params": {"target_parent": "organization"},\n'
+            '  "action_params": {"target_parent": "organization.n.01"},\n'
             '  "rationale": "The definition \'an organization to gain political power\' and the O*NET examples about advising political parties describe an organization (an actor), not an activity.",\n'
             '  "confidence": 0.9\n'
             "}\n\n"
@@ -185,11 +185,11 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
             "Judge each occurrence by the DEFINITION: for every path, ask whether "
             "the concept truly IS-A its parent there.\n\n"
             "Decide ONE of:\n"
-            "- accept: every listed placement is a valid IS-A relation; the "
-            "multiple inheritance is legitimate and should stay.\n"
-            "- delete: at least one placement is wrong and the concept should be "
-            "DETACHED from that parent (the node itself is kept in its valid "
-            "location(s)). You MUST say which parent(s) to detach from.\n\n"
+            "- accept: keep the existing multiple-parent structure exactly as-is because "
+            "every listed placement is already a valid and distinct IS-A relation.\n"
+            "- delete: remove one or more existing parent edges because those placements "
+            "are not valid IS-A relations. The concept itself remains under its valid "
+            "parent(s). You MUST identify the parent edge(s) to detach.\n\n"
             "IMPORTANT RULES:\n"
             "- suggested_action MUST be EXACTLY \"accept\" or \"delete\". These "
             "match the reviewer's action buttons. Never output meta-advice like "

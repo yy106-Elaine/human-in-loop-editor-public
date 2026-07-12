@@ -131,7 +131,7 @@ function describeActionParams(params: unknown): string | null {
   return null;
 }
 
-type StatusFilter = "all" | "unfinished" | "finished" | "conflicts" | "learned";
+type StatusFilter = "all" | "unfinished" | "finished" | "conflicts";
 
 interface PrincipleOption {
   id: string;
@@ -697,9 +697,11 @@ export function EditPatternsPage({
                       )}
                     </div>
                     <p className="text-sm text-gray-600 mt-1">
-                      {isAll
-                        ? "Previewing one loaded page per category. Open a category to page through all suggestions."
-                        : activeCategory!.description}
+                      {statusFilter === "unfinished"
+                        ? "Showing suggestions you have not reviewed yet. Other users’ decisions do not remove cards from your queue."
+                        : isAll
+                          ? "Previewing one loaded page per category. Open a category to page through all suggestions."
+                          : activeCategory!.description}
                     </p>
                     <p className="text-xs text-gray-400 mt-1">
                       Showing {displayedSuggestions.length}
@@ -1027,7 +1029,7 @@ function SuggestionCard({
       )}
 
       {suggestion.path && (
-        <p className="text-xs text-gray-500 mt-3">{suggestion.path}</p>
+        <p className="text-xs text-gray-500 mt-3 whitespace-normal break-words">{suggestion.path}</p>
       )}
 
       {decisions.length > 0 && (

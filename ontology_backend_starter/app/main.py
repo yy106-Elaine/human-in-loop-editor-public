@@ -86,26 +86,100 @@ CONFLICTS: List[Dict[str, Any]] = []
 PRINCIPLES: List[Dict[str, Any]] = [
     {
         "id": "principle-duplicate-sense",
-        "title": "Same label does not always mean same concept",
+        "title": "Nodes with the same name do not necessarily mean the same thing",
         "body": (
-            "When two nodes share a label but have different synsets or different inheritance paths, "
-            "reviewers should decide whether the label reflects duplicate concepts or distinct senses "
-            "that need clearer names."
+            "When two nodes share a name but have different synsets or different inheritance paths, "
+            "reviewers should decide whether the label reflects the same concept and should be merged, "
+            "or distinct senses that need clearer names."
         ),
-        "source": "initial",
+        "source": "seed",
         "examples": [],
         "category": "duplicate",
     },
     {
-        "id": "principle-virtual-utility",
-        "title": "Virtual nodes should contribute inheritance value",
+        "id": "principle-duplicate-disambiguation",
+        "title": "Distinguish meanings by renaming or adding a clarifying suffix",
         "body": (
-            "A virtual node should be kept when it organizes multiple children or captures a reusable abstraction. "
-            "It should be altered or removed when it adds little structure or obscures meaning."
+            "When same-named nodes have distinct meanings, rename them. Prefer a clear synonym when one "
+            "is available and unused; otherwise add a clarifying parenthetical suffix, such as "
+            "'litter (animal)' and 'litter (trash)'."
         ),
-        "source": "initial",
+        "source": "seed",
+        "examples": [],
+        "category": "duplicate",
+    },
+    {
+        "id": "principle-virtual-organizing-value",
+        "title": "Virtual nodes should contribute organizing value",
+        "body": (
+            "Keep a virtual node only when it usefully organizes the nodes beneath it. As a rule of thumb, "
+            "each level of abstraction should usually contain about 3-8 categories, with exceptions. "
+            "An only-child virtual node may add little value, while a virtual node that prevents an "
+            "overcrowded sibling list may be useful."
+        ),
+        "source": "seed",
         "examples": [],
         "category": "virtual",
+    },
+    {
+        "id": "principle-misplaced-top-categories",
+        "title": "Use the four noun-category definitions when reviewing placement",
+        "body": (
+            "Physical Entities are tangible material things; Information entities are defined by meaning, "
+            "content, or representation; Actors perform or can be treated as performing actions; Activities "
+            "are happenings, processes, occurrences, or changes. Use these definitions when choosing the "
+            "correct top-level ontology."
+        ),
+        "source": "seed",
+        "examples": [],
+        "category": "misplaced",
+    },
+    {
+        "id": "principle-misplaced-is-a",
+        "title": "Every child must be a type of its parent",
+        "body": (
+            "Every parent-child edge must express an IS-A relationship. For example, an engine is not a "
+            "type of vehicle, so it should instead be placed under a parent such as component or car component."
+        ),
+        "source": "seed",
+        "examples": [],
+        "category": "misplaced",
+    },
+    {
+        "id": "principle-inheritance-distinct-parents",
+        "title": "Multiple parents must be distinct and both contribute inheritance",
+        "body": (
+            "A node should have more than one parent only when the parents are genuinely distinct and the node "
+            "inherits properties from both. A book may be both information and a physical object. By contrast, "
+            "device > electronic device > smartphone is a normal ancestry chain, not a reason to give smartphone "
+            "both device and electronic device as direct parents."
+        ),
+        "source": "seed",
+        "examples": [],
+        "category": "inheritance",
+    },
+    {
+        "id": "principle-naming-no-underscores",
+        "title": "Node names should avoid underscores",
+        "body": (
+            "Underscores are artifacts of ontology generation and should be replaced with spaces. For example, "
+            "'electro-acoustic_transducer' should become 'electro-acoustic transducer'."
+        ),
+        "source": "seed",
+        "examples": [],
+        "category": "naming",
+    },
+    {
+        "id": "principle-global-no-artifact-prefixes",
+        "title": "Node names should not contain artifact prefixes",
+        "body": (
+            "Remove generated prefixes such as numbering ('1. Name') and bracketed markers such as '[virtual]'. "
+            "Node names should contain substantive text. Meaning-clarifying suffixes such as "
+            "'class (socioeconomic)' are allowed."
+        ),
+        "source": "seed",
+        "examples": [],
+        "category": "all",
     },
 ]
 
@@ -205,6 +279,110 @@ def flatten_tree(nodes, parent_path=None) -> List[Dict[str, Any]]:
         )
         rows.extend(flatten_tree(node.children or [], path))
     return rows
+
+
+@lru_cache(maxsize=1)
+def _ontology_reference_index() -> Dict[str, Dict[str, Any]]:
+    """Index real ontology nodes by id, synset code, and normalized label."""
+    rows = flatten_tree(ONTOLOGY_TREE)
+    by_id = {str(row["id"]).strip().lower(): row for row in rows if row.get("id")}
+    by_code = {str(row["code"]).strip().lower(): row for row in rows if row.get("code")}
+    by_label: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        label = _norm_pattern_label(str(row.get("label") or ""))
+        if label:
+            by_label.setdefault(label, []).append(row)
+    return {"by_id": by_id, "by_code": by_code, "by_label": by_label, "rows": rows}
+
+
+def _resolve_existing_node_ref(value: Any) -> Optional[Dict[str, Any]]:
+    """Resolve an LLM-proposed node reference only when it maps to a real node.
+
+    Exact ids and synset codes are preferred. A label is accepted only when it
+    identifies exactly one node, avoiding ambiguous free-form destinations.
+    """
+    ref = str(value or "").strip()
+    if not ref:
+        return None
+    index = _ontology_reference_index()
+    key = ref.lower()
+    if key in index["by_id"]:
+        return index["by_id"][key]
+    if key in index["by_code"]:
+        return index["by_code"][key]
+    matches = index["by_label"].get(_norm_pattern_label(ref), [])
+    return matches[0] if len(matches) == 1 else None
+
+
+def _valid_parent_options(row: Dict[str, Any], limit: int = 25) -> List[Dict[str, Any]]:
+    """Return real, nearby ontology nodes that the LLM may choose as parents."""
+    rows = _ontology_reference_index()["rows"]
+    current_id = str(row.get("id") or "")
+    current_top = _top_category(row)
+    candidates = [
+        candidate for candidate in rows
+        if candidate.get("id") != current_id
+        and candidate.get("children_count", 0) > 0
+        and _top_category(candidate) == current_top
+    ]
+    candidates.sort(key=lambda candidate: (len(candidate.get("path") or []), str(candidate.get("label") or "")))
+    return candidates[:limit]
+
+
+def _format_parent_options(row: Dict[str, Any], limit: int = 25) -> str:
+    options = _valid_parent_options(row, limit=limit)
+    if not options:
+        return "(no validated candidates available; recommend accept instead of inventing a parent)"
+    return "\n".join(
+        f'- node_id={option["id"]}; label={option["label"]}; path={option.get("path_string", "")}'
+        for option in options
+    )
+
+
+def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
+    """Prevent cards from proposing ontology nodes that do not exist."""
+    result = dict(suggestion)
+    params = dict(result.get("action_params") or {})
+    action = str(result.get("suggested_action") or "").strip().lower()
+
+    ref_fields = {
+        "place_elsewhere": "target_parent",
+        "add_parent": "additional_parent",
+    }
+    field = ref_fields.get(action)
+    if field:
+        resolved = _resolve_existing_node_ref(params.get(field))
+        if resolved is None:
+            result["suggested_action"] = "accept"
+            result["action_params"] = {}
+            result["rationale"] = (
+                f'{result.get("rationale", "")} The proposed {field.replace("_", " ")} did not match '
+                "a unique existing ontology node, so the invalid structural edit was suppressed."
+            ).strip()
+            result["validation_warning"] = f"Invalid or ambiguous ontology reference: {params.get(field)!r}"
+            return result
+        params[field] = resolved["id"]
+        params[f"{field}_label"] = resolved["label"]
+
+    if action == "merge":
+        merge_target = _resolve_existing_node_ref(params.get("merge_into"))
+        target_parent = _resolve_existing_node_ref(params.get("target_parent"))
+        if merge_target is None or target_parent is None:
+            result["suggested_action"] = "rename"
+            result["action_params"] = {"renames": []}
+            result["rationale"] = (
+                f'{result.get("rationale", "")} The merge target or resulting parent did not match '
+                "a unique existing ontology node, so the unsafe merge recommendation was suppressed."
+            ).strip()
+            result["validation_warning"] = "Merge requires an existing merge target and existing resulting parent."
+            return result
+        params["merge_into"] = merge_target["id"]
+        params["merge_into_label"] = merge_target["label"]
+        params["target_parent"] = target_parent["id"]
+        params["target_parent_label"] = target_parent["label"]
+
+    result["action_params"] = params
+    return result
 
 
 class PatternDecisionRequest(BaseModel):
@@ -685,7 +863,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
             fallback=_inh_fb,
         )
         suggestions.append(
-            {
+            _validate_suggestion_action({
                 "id": f"inheritance::{code_key}",
                 "pattern_type": "inheritance",
                 "rerun_with_current_prompt": _rerun_with_current_prompt(_inh_scored, "inheritance"),
@@ -706,7 +884,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
                     for row in matches[:6]
                 ],
                 "synsets": synsets,
-            }
+            })
         )
 
     suggestions.sort(key=lambda item: (-item["confidence"], item["label"]))
@@ -746,12 +924,15 @@ def _misplaced_suggestion_for_row(row: Dict[str, Any]) -> Optional[Dict[str, Any
             f"O*NET task examples: {'; '.join(_sem_onet or []) or '—'}\n"
             f"Current path: {path_string}\n"
             f"Current top category: {top}\n"
-            f"Parent: {path[-2] if len(path) >= 2 else '—'}"
+            f"Parent: {path[-2] if len(path) >= 2 else '—'}\n"
+            "VALID DESTINATION PARENTS (choose only an exact node_id from this list):\n"
+            f"{_format_parent_options(row)}"
         ),
         fallback=_mis_fb,
         model=MISPLACED_MODEL,
     )
 
+    _mis_scored = _validate_suggestion_action(_mis_scored)
     action = (_mis_scored.get("suggested_action") or "").lower()
     # Only surface real, LLM-judged problems: skip unscored fallbacks and
     # nodes the model accepted as correctly placed.
@@ -987,7 +1168,7 @@ def _page_suggestions(
 
 def _category_response(category: str, limit: int, offset: int, q: str = "") -> Dict[str, Any]:
     detected = _detect_category_patterns(category)
-    suggestions = detected.get("suggestions", [])
+    suggestions = [_validate_suggestion_action(s) for s in detected.get("suggestions", [])]
     page = _page_suggestions(suggestions, limit=limit, offset=offset, q=q)
     meta = PATTERN_CATEGORY_META[category]
 
@@ -1218,6 +1399,7 @@ def rerun_node(body: RerunNodeRequest):
             status_code=404,
             detail=f"Re-run did not produce a result for {cache_key}",
         )
+    match = _validate_suggestion_action(match)
     return {"ok": True, "cache_key": cache_key, "suggestion": match}
 
 @app.get("/wordnet/{code}")
@@ -1705,7 +1887,11 @@ def rerun_batch(body: BatchRerunRequest):
             os.environ["SKIP_LLM"] = old_skip
 
     refreshed_map = {s.get("id"): s for s in refreshed.get("suggestions", [])}
-    results = [refreshed_map[k] for k in target_ids if k in refreshed_map]
+    results = [
+        _validate_suggestion_action(refreshed_map[k])
+        for k in target_ids
+        if k in refreshed_map
+    ]
 
     log_event(
         node_id=f"prompt::{edit_type}",
