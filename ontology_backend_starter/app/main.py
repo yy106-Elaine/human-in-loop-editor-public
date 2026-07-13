@@ -476,6 +476,18 @@ def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
                 # LLM gave only if the candidate carried no resolvable parent.
                 target_parent = keep_parent or target_parent
 
+        # Virtual-node merge: a [virtual] grouping node is merged INTO an existing
+        # REAL node (merge_target). _resolve_existing_node_ref only resolves nodes
+        # that actually exist, so a hallucinated target yields None and falls back
+        # to accept below. The virtual node's children move under the target, so
+        # when the LLM omits target_parent we default it to the merge target.
+        if (
+            result.get("pattern_type") == "virtual"
+            and merge_target is not None
+            and target_parent is None
+        ):
+            target_parent = merge_target
+
         if merge_target is None or target_parent is None:
             # Genuinely can't bind a safe merge -> keep the node(s) as-is rather
             # than emitting a meaningless empty rename. Displays as "Keep as is".

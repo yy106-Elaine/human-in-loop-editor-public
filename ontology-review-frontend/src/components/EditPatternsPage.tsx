@@ -94,6 +94,18 @@ function actionColor(action?: string): string {
   }
 }
 
+// Display-only label for the AI action. The backend value stays "accept";
+// we show "Keep as is" so it is not confused with the reviewer's Accept button.
+function displayAction(action?: string): string {
+  switch ((action || "").toLowerCase()) {
+    case "accept":
+    case "keep":
+      return "keep as is";
+    default:
+      return action || "";
+  }
+}
+
 // Turn action_params into a readable phrase instead of raw JSON.
 function describeActionParams(params: unknown): string | null {
   if (!params || typeof params !== "object") return null;
@@ -937,7 +949,7 @@ function SuggestionCard({
     try {
       const res = await rerunNode(suggestion.id);
       setStatus(
-        `Re-ran. New action: ${res.suggestion.suggested_action} (${Math.round(
+        `Re-ran. New action: ${displayAction(res.suggestion.suggested_action)} (${Math.round(
           res.suggestion.confidence * 100
         )}%).`
       );
@@ -999,7 +1011,7 @@ function SuggestionCard({
           <p className="text-sm text-gray-500 mt-1">
             Suggested action:{" "}
             <span className={`font-semibold ${actionColor(shown.suggested_action)}`}>
-              {shown.suggested_action}
+              {displayAction(shown.suggested_action)}
             </span>
             {(() => {
               const desc = describeActionParams(shown.action_params);
@@ -1471,7 +1483,7 @@ function FinishedChangeRow({
             <span>
               AI suggested{" "}
               <span className={`font-semibold ${actionColor(aiAction)}`}>
-                {aiAction}
+                {displayAction(aiAction)}
               </span>
               {aiParamsText && (
                 <span className="text-gray-500"> {aiParamsText}</span>
@@ -1484,7 +1496,7 @@ function FinishedChangeRow({
             <span>
               {" → "}
               <span className={`font-semibold ${actionColor(humanAction)}`}>
-                {humanAction}
+                {displayAction(humanAction)}
               </span>
             </span>
           )}

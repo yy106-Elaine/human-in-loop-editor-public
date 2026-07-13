@@ -342,9 +342,9 @@ export function PromptEditor({
             </div>
             <button
               onClick={() => runBatch(true)}
-              disabled={runningBatch || loading || !isAdmin}
+              disabled={runningBatch || loading}
               className="inline-flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-red-300 bg-white hover:bg-red-50 text-red-700 disabled:opacity-50"
-              title={isAdmin ? "Run all suggestions in this category" : "Admin only"}
+              title="Run all suggestions in this category"
             >
               RUN ALL (only if confident)
             </button>
