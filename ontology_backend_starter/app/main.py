@@ -395,98 +395,55 @@ def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
             return result
         params[field] = resolved["id"]
         params[f"{field}_label"] = resolved["label"]
-        params[f"{field}_path"] = resolved.get("path_string", resolved["label"])
-
-    if action == "delete" and result.get("pattern_type") == "inheritance":
-        # A multiple-inheritance correction removes ONE invalid parent edge,
-        # never the concept and never every parent. There is intentionally no
-        # two-parent cap: a concept may have 2, 3, or more legitimate parents.
-        nodes = result.get("nodes") or []
-        parent_refs = []
-        for node in nodes:
-            parent_label = str(node.get("parent_label") or "").strip()
-            parent_path = str(node.get("path") or "").strip()
-            ref = parent_path or parent_label
-            if ref and ref not in parent_refs:
-                parent_refs.append(ref)
-
-        raw_remove = params.get("remove_parents")
-        removals = raw_remove if isinstance(raw_remove, list) else []
-        removals = [str(value).strip() for value in removals if str(value).strip()]
-
-        if len(parent_refs) < 2 or not removals:
-            result["suggested_action"] = "accept"
-            result["action_params"] = {}
-            result["rationale"] = (
-                f'{result.get("rationale", "")} A parent edge can only be detached '
-                "when the concept has at least two current placements and one specific "
-                "invalid parent is identified."
-            ).strip()
-            result["validation_warning"] = (
-                "Unsafe multiple-inheritance deletion was suppressed."
-            )
-            return result
-
-        # Keep only one proposed edge removal. This guarantees at least one
-        # placement remains even when the concept has exactly two parents.
-        if len(removals) > 1:
-            result["rationale"] = (
-                f'{result.get("rationale", "")} Only the first invalid parent edge '
-                "is proposed for removal in this review; the remaining placements "
-                "stay intact and can be reviewed separately."
-            ).strip()
-            result["validation_warning"] = (
-                "The LLM proposed multiple detachments; reduced to one parent edge."
-            )
-
-        params["remove_parents"] = [removals[0]]
-        params["current_parent_count"] = len(parent_refs)
-        params["remaining_parent_count"] = max(1, len(parent_refs) - 1)
 
     if action == "merge":
         merge_target = _resolve_existing_node_ref(params.get("merge_into"))
         target_parent = _resolve_existing_node_ref(params.get("target_parent"))
-        # For duplicate suggestions, the merge target must be ONE OF the flagged
-        # candidate nodes — not some other node the LLM hallucinated that merely
-        # happens to resolve. Without this, a bogus merge_into like "people"
-        # could pass validation and produce a wrong merge.
         candidate_nodes = result.get("nodes") or []
-        if candidate_nodes and merge_target is not None:
-            allowed = set()
+        # For a duplicate merge, bind the action to the flagged candidate nodes'
+        # CONCRETE ids rather than re-resolving the LLM's label/synset (which is
+        # ambiguous exactly when nodes share a synset — the rip.n.02 / summons.n.02
+        # case — and used to get wrongly suppressed into an empty rename).
+        if candidate_nodes:
+            def _norm(v: Any) -> str:
+                return str(v or "").strip().lower()
+
+            # Pick which candidate to keep: the one the LLM's merge_into points
+            # at (by id or synset); if that is ambiguous or missing, keep the
+            # first candidate. Either is valid — same-synset nodes are the same
+            # concept — and the reviewer can Alter if needed.
+            wanted = _norm(params.get("merge_into"))
+            keep = None
             for cand in candidate_nodes:
-                for key in ("id", "code", "label"):
-                    v = str(cand.get(key) or "").strip().lower()
-                    if v:
-                        allowed.add(v)
-            resolved_keys = {
-                str(merge_target.get("id") or "").strip().lower(),
-                str(merge_target.get("label") or "").strip().lower(),
-                str(params.get("merge_into") or "").strip().lower(),
-            }
-            if not (resolved_keys & allowed):
-                merge_target = None  # target is outside the candidate set
-        # For a duplicate merge, the merged node naturally lives under the kept
-        # node's OWN existing parent. If the LLM's target_parent didn't resolve
-        # (common when two nodes share a synset), derive it from merge_target's
-        # path instead of suppressing the whole merge into an empty rename.
-        if candidate_nodes and merge_target is not None and target_parent is None:
-            mt_path = merge_target.get("path") or []
-            if len(mt_path) >= 2:
-                target_parent = _resolve_existing_node_ref(mt_path[-2])
+                if wanted and wanted in {_norm(cand.get("id")), _norm(cand.get("code")), _norm(cand.get("label"))}:
+                    keep = cand
+                    break
+            if keep is None:
+                keep = candidate_nodes[0]
+
+            keep_node = _resolve_existing_node_ref(keep.get("id"))
+            keep_parent = _resolve_existing_node_ref(keep.get("parent_id"))
+            if keep_node is not None:
+                merge_target = keep_node
+                # Prefer the kept node's real parent; fall back to whatever the
+                # LLM gave only if the candidate carried no resolvable parent.
+                target_parent = keep_parent or target_parent
+
         if merge_target is None or target_parent is None:
-            result["suggested_action"] = "rename"
-            result["action_params"] = {"renames": []}
+            # Genuinely can't bind a safe merge -> keep the node(s) as-is rather
+            # than emitting a meaningless empty rename. Displays as "Keep as is".
+            result["suggested_action"] = "accept"
+            result["action_params"] = {}
             result["rationale"] = (
-                f'{result.get("rationale", "")} The merge target or resulting parent did not match '
-                "a unique existing ontology node, so the unsafe merge recommendation was suppressed."
+                f'{result.get("rationale", "")} A safe merge target and resulting parent could not be '
+                "confirmed automatically, so the nodes are kept as they are for manual review."
             ).strip()
-            result["validation_warning"] = "Merge requires an existing merge target and existing resulting parent."
+            result["validation_warning"] = "Merge could not be bound to concrete ontology nodes; kept as is."
             return result
         params["merge_into"] = merge_target["id"]
         params["merge_into_label"] = merge_target["label"]
         params["target_parent"] = target_parent["id"]
         params["target_parent_label"] = target_parent["label"]
-        params["target_parent_path"] = target_parent.get("path_string", target_parent["label"])
 
     if action == "rename":
         # #5 safety net: a rename must NOT target a label that already belongs
@@ -970,7 +927,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
 
         _paths = "\n".join(
             f"- {r['label']} ({r.get('code') or 'no synset'}): {r.get('path_string','')}"
-            for r in matches
+            for r in matches[:6]
         )
         _inh_fb = {
             "suggested_action": "consider_multiple_inheritance",
@@ -1013,7 +970,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
                         "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
                         "path": row.get("path_string", ""),
                     }
-                    for row in matches
+                    for row in matches[:6]
                 ],
                 "synsets": synsets,
             })

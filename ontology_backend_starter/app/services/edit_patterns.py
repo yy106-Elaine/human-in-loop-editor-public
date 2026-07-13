@@ -220,6 +220,7 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
                         "id": n.id,
                         "label": n.label,
                         "code": n.code,
+                        "parent_id": n.parent_id,
                         "parent_label": n.parent_label,
                         "path": " → ".join(n.path),
                     }
@@ -273,19 +274,30 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
         "confidence": confidence,
     }
 
+    # Detect a machine-generated / messy label that would need cleanup IF the
+    # node is worth keeping: underscores, an "[virtual]" marker, a numbering
+    # prefix ("1. foo"), or joiner artifacts like "_as_" / "_of_".
+    _raw = str(node.label or "")
+    _machine_label = bool(
+        "_" in _raw
+        or "[virtual]" in _raw.lower()
+        or re.match(r"^\s*\d+[\.\)]", _raw)
+    )
+
     # Build a per-node data block from the node's OWN fields. (We do NOT use
     # get_context_by_label here: virtual labels like "[virtual] shape" rarely
     # match WordNet, and when a label does match it is label-ambiguous.) Giving
     # the model concrete signals — how many children it groups, whether the
-    # label is generic, whether it has a synset — lets it actually recommend
-    # rename/delete instead of defaulting every virtual node to "accept".
+    # label is generic or machine-generated, whether it has a synset — lets it
+    # recommend delete/rename instead of defaulting every virtual node to accept.
     candidate_text = (
         f"Label: {node.label}\n"
         f"Synset: {node.code or 'none (virtual grouping node)'}\n"
         f"Ontology path: {' → '.join(node.path)}\n"
         f"Parent: {node.parent_label or '(root)'}\n"
         f"Number of children it groups: {node.children_count}\n"
-        f"Label is generic/vague: {'yes' if normalized in vague_terms else 'no'}"
+        f"Label is generic/vague: {'yes' if normalized in vague_terms else 'no'}\n"
+        f"Label looks machine-generated (needs cleanup if kept): {'yes' if _machine_label else 'no'}"
     )
 
     scored = score_candidate(
