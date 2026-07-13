@@ -92,6 +92,33 @@ export default function App() {
 
   const visibleHighlights = useMemo(() => errorHighlights, [errorHighlights]);
 
+  // Resizable left sidebar: drag the divider to change its width.
+  const [sidebarWidth, setSidebarWidth] = useState<number>(320);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const MIN = 220;
+    const MAX = 640;
+    const onMove = (e: MouseEvent) => {
+      // Sidebar starts at the left edge, so its width is the cursor's x.
+      const w = Math.min(MAX, Math.max(MIN, e.clientX));
+      setSidebarWidth(w);
+    };
+    const onUp = () => setDragging(false);
+    // Prevent text selection / page-scroll while dragging.
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [dragging]);
+
   if (authLoading) {
     return (
       <div className="h-screen bg-gray-100 flex items-center justify-center text-sm text-gray-500">
@@ -150,7 +177,10 @@ export default function App() {
       </header>
 
       <div className="flex-1 min-h-0 overflow-hidden">
-        <div className="h-full grid grid-cols-[320px_minmax(0,1fr)]">
+        <div
+          className="h-full grid"
+          style={{ gridTemplateColumns: `${sidebarWidth}px 6px minmax(0,1fr)` }}
+        >
           <aside className="min-h-0 overflow-hidden bg-white border-r border-gray-200">
             <OntologyTree
               onNodeSelect={setSelectedNodeId}
@@ -160,6 +190,18 @@ export default function App() {
               focusNodeIds={focusNodeIds}
             />
           </aside>
+
+          {/* Draggable divider — drag to resize the sidebar. */}
+          <div
+            onMouseDown={() => setDragging(true)}
+            onDoubleClick={() => setSidebarWidth(320)}
+            title="Drag to resize · double-click to reset"
+            className={`h-full cursor-col-resize select-none flex items-center justify-center transition-colors ${
+              dragging ? "bg-blue-400" : "bg-gray-200 hover:bg-blue-300"
+            }`}
+          >
+            <div className="w-px h-8 bg-gray-400" />
+          </div>
 
           <main className="min-h-0 overflow-hidden flex flex-col bg-gray-50">
             <div className="flex-1 min-h-0 overflow-hidden">
