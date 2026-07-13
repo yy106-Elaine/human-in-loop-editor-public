@@ -421,6 +421,25 @@ def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
     if action == "merge":
         merge_target = _resolve_existing_node_ref(params.get("merge_into"))
         target_parent = _resolve_existing_node_ref(params.get("target_parent"))
+        # For duplicate suggestions, the merge target must be ONE OF the flagged
+        # candidate nodes — not some other node the LLM hallucinated that merely
+        # happens to resolve. Without this, a bogus merge_into like "people"
+        # could pass validation and produce a wrong merge.
+        candidate_nodes = result.get("nodes") or []
+        if candidate_nodes and merge_target is not None:
+            allowed = set()
+            for cand in candidate_nodes:
+                for key in ("id", "code", "label"):
+                    v = str(cand.get(key) or "").strip().lower()
+                    if v:
+                        allowed.add(v)
+            resolved_keys = {
+                str(merge_target.get("id") or "").strip().lower(),
+                str(merge_target.get("label") or "").strip().lower(),
+                str(params.get("merge_into") or "").strip().lower(),
+            }
+            if not (resolved_keys & allowed):
+                merge_target = None  # target is outside the candidate set
         if merge_target is None or target_parent is None:
             result["suggested_action"] = "rename"
             result["action_params"] = {"renames": []}
