@@ -129,10 +129,17 @@ def score_candidate(
     fallback: Dict[str, Any],
     force: bool = False,
     model: str | None = None,
+    principles_text: str = "",
 ) -> Dict[str, Any]:
     """Score one candidate. Reads ONLY from the in-memory cache (primed once
     via prime_cache). Never queries Supabase per-key, so it can't trigger
-    the N+1 connection storm."""
+    the N+1 connection storm.
+
+    principles_text (optional): reviewer principles relevant to this edit type,
+    injected into the LLM message so suggestions follow team conventions. It is
+    intentionally NOT part of cache_key — a cached score is reused regardless of
+    principle wording; a re-run (force / RUN ALL) picks up the latest principles.
+    """
     prime_cache()
 
     # 1. In-memory cache hit -> return directly (unless force re-run)
@@ -153,6 +160,15 @@ def score_candidate(
         # braces (JSON examples), which would make .format() throw and silently
         # drop to the fallback.
         user = prompt["user"].replace("{candidate}", candidate_text)
+        # Prepend relevant reviewer principles so the LLM follows team
+        # conventions (added to the user message, not the cache key).
+        if principles_text.strip():
+            user = (
+                "Reviewer principles you MUST follow when deciding:\n"
+                f"{principles_text.strip()}\n\n"
+                "----\n\n"
+                + user
+            )
         raw = call_llm(prompt["system"], user, model=model)
         parsed = _parse_llm_json(raw)
         if parsed is not None:

@@ -15,54 +15,42 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
     "duplicate": {
         "label": "Duplicate Handling",
         "system": (
-            "You are auditing a noun taxonomy for an ontology engineering project. "
-            "You are given two or more nodes that share the same or a similar label. "
-            "Sharing a label does NOT mean they are duplicates — many labels repeat "
-            "across the taxonomy with genuinely different senses (e.g. 'party' as a "
-            "political organization vs. a social gathering).\n\n"
-            "Use the DEFINITION, SYNONYMS, and PATH of each node to decide:\n"
-            "- merge: the nodes refer to the same concept (same or near-identical "
-            "definition/synset) and should be combined.\n"
-            "- rename: the nodes are different senses that happen to "
-            "share a label; keep them separate but rename to disambiguate.\n\n"
-            "Be conservative: only recommend MERGE when the senses are clearly the same.\n\n"
-            "IMPORTANT RULES:\n"
-            "- suggested_action MUST be EXACTLY one of these strings: "
-            "\"merge\" or \"rename\". Never invent other "
-            "values like \"relabel\", \"keep\", or \"keep_separate_rename\".\n"
-            "- confidence must reflect genuine uncertainty. Reserve 0.95-1.0 "
-            "ONLY when definitions are word-for-word identical. Use 0.7-0.9 "
-            "when concepts are clearly the same but wording differs, and "
-            "0.5-0.7 when it is a judgment call. Do NOT default everything to "
-            "1.0.\n\n"
-            "Return STRICT JSON only, no markdown, no comments.\n\n"
-            "The JSON MUST have these keys: suggested_action, action_params, "
-            "rationale, confidence.\n\n"
-            "action_params is a REQUIRED object; its contents depend on the action:\n"
-            "- If suggested_action is \"rename\": action_params MUST contain a "
-            "\"renames\" array, one object per node that needs a new label, each "
-            "with \"node_id\" and \"new_label\". new_label MUST be concrete and "
-            "disambiguated (e.g. \"tract (anatomy)\"), never empty.\n"
-            "- If suggested_action is \"merge\": action_params MUST contain "
-            "\"merge_into\" (the node_id you would keep) AND \"target_parent\" "
-            "(the label or synset id of the parent the merged node should live "
-            "under — usually the kept node's current parent; if the two nodes "
-            "have different parents, pick the one whose IS-A relation the "
-            "definition supports, and justify the choice in the rationale).\n\n"
-            "Example for rename:\n"
-            "{\n"
-            '  "suggested_action": "rename",\n'
-            '  "action_params": {"renames": [{"node_id": "tract.n.02", "new_label": "tract (anatomy)"}, {"node_id": "tract.n.01", "new_label": "tract (land)"}]},\n'
-            '  "rationale": "Different senses of the word tract.",\n'
-            '  "confidence": 0.95\n'
-            "}\n\n"
-            "Example for merge:\n"
-            "{\n"
-            '  "suggested_action": "merge",\n'
-            '  "action_params": {"merge_into": "actor.n.01", "target_parent": "person"},\n'
-            '  "rationale": "Both nodes have identical definitions; the kept node\'s parent \'person\' is the correct IS-A home for the merged concept.",\n'
-            '  "confidence": 1.0\n'
-            "}"
+            "You are auditing an ontology for DUPLICATE concepts. You are given a set of\n"
+            "nodes that all share the same label. They are the ONLY candidates — every node\n"
+            "you may act on is listed in the input, each with its node_id, synset, ontology\n"
+            "path, definition, synonyms, and supersenses.\n\n"
+            "Your job: decide whether these same-label nodes are the SAME concept or\n"
+            "DIFFERENT senses.\n\n"
+            "Decide by MEANING, using the fields given — never by the shared label alone:\n"
+            "- SAME concept (recommend \"merge\") only when the nodes have the same synset OR\n"
+            "  clearly identical definitions AND compatible ontology paths.\n"
+            "- DIFFERENT senses (recommend \"rename\") when the synsets differ, the\n"
+            "  definitions differ, or the ontology paths place them in genuinely different\n"
+            "  parts of the tree (e.g. \"class.n.02\" under education vs \"class.n.03\" under\n"
+            "  social group).\n\n"
+            "Hard rules for the action:\n"
+            "- \"merge\": set action_params.merge_into to the SYNSET of the node that should\n"
+            "  be kept, and action_params.target_parent to that node's existing parent.\n"
+            "  merge_into MUST be one of the candidate synsets/node_ids in the input — do\n"
+            "  NOT invent or reference any node that is not listed.\n"
+            "- \"rename\": you MUST provide a concrete new_label for each node that needs\n"
+            "  disambiguation, in action_params.renames as a list of\n"
+            "  {\"node_id\": <id>, \"new_label\": <concrete disambiguated label>}. Prefer a\n"
+            "  clearer synonym; otherwise add a parenthetical sense, e.g. \"class (education)\"\n"
+            "  vs \"class (social group)\". Never return \"rename\" with an empty renames list.\n"
+            "- Never recommend renaming a node to a label that already belongs to another\n"
+            "  existing node — that would be a merge, not a rename.\n\n"
+            "Follow any provided review principles.\n\n"
+            "Ground every judgement in the definition, synset, and ontology path shown for\n"
+            "each candidate. Give a short rationale a non-expert reviewer can understand —\n"
+            "name the specific difference (e.g. \"different synsets: class.n.02 vs class.n.03,\n"
+            "and different parents\") rather than vague phrasing. Return calibrated\n"
+            "confidence.\n\n"
+            "Respond ONLY with JSON:\n"
+            "{\"suggested_action\": \"merge\" | \"rename\",\n"
+            " \"action_params\": { ... as specified above ... },\n"
+            " \"rationale\": \"...\",\n"
+            " \"confidence\": 0.0-1.0}"
         ),
         "user": (
             "## Candidate nodes sharing a label\n{candidate}\n\n"
@@ -74,32 +62,51 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
         "system": (
             "You are auditing a noun taxonomy for an ontology engineering project. "
             "A '[virtual]' node is an abstract grouping node inserted to organize "
-            "children, not a real WordNet concept. Decide whether it earns its place:\n"
-            "- accept: it groups multiple children or captures a reusable abstraction "
-            "that improves MECE structure; keep it as-is.\n"
-            "- rename: it is useful but mislabeled or unclear; give it a clearer label.\n"
-            "- delete: it adds little organizational value and could be flattened.\n\n"
-            "Be conservative.\n\n"
+            "children, not a real WordNet concept. Decide whether it earns its place. "
+            "Do NOT default to accept — actively look for nodes that should be "
+            "renamed or removed.\n\n"
+            "Use the signals given (number of children it groups, whether the label "
+            "is generic/vague, its path) to choose:\n"
+            "- accept: it groups multiple children (roughly 3-8) into a meaningful, "
+            "clearly-labeled abstraction that improves structure; keep it as-is.\n"
+            "- rename: it is useful but its label is vague, generic, or unclear "
+            "(e.g. 'thing', 'group', 'unit'); give it a concrete, specific label.\n"
+            "- delete: it groups 0 or 1 children, or adds little organizational "
+            "value and could be flattened into its parent.\n\n"
             "Return STRICT JSON only, no markdown, no comments.\n\n"
             "The JSON MUST have these keys: suggested_action, action_params, "
             "rationale, confidence.\n\n"
             "action_params is a REQUIRED object:\n"
             "- If suggested_action is \"rename\": action_params MUST contain "
-            "\"new_label\", a concrete clearer label, never empty.\n"
+            "\"new_label\", a concrete clearer label, never empty. The new_label "
+            "MUST NOT be the label of another existing node — if the clearest name "
+            "is already taken by a real node, that is a signal to delete/flatten "
+            "this virtual node, not rename it.\n"
             "- If suggested_action is \"accept\" or \"delete\": use an empty "
             "object {}.\n\n"
+            "Follow any provided review principles.\n\n"
+            "Give a short rationale a non-expert reviewer can understand — cite the "
+            "concrete signal (e.g. 'only 1 child, so it can be flattened' or "
+            "'label \"group\" is too generic'). Return calibrated confidence.\n\n"
             "Example for rename:\n"
             "{\n"
             '  "suggested_action": "rename",\n'
             '  "action_params": {"new_label": "physical process"},\n'
-            '  "rationale": "The current label is unclear.",\n'
+            '  "rationale": "Groups 5 children but the label is generic.",\n'
             '  "confidence": 0.8\n'
+            "}\n\n"
+            "Example for delete:\n"
+            "{\n"
+            '  "suggested_action": "delete",\n'
+            '  "action_params": {},\n'
+            '  "rationale": "Only 1 child, so it adds no grouping value.",\n'
+            '  "confidence": 0.75\n'
             "}\n\n"
             "Example for accept:\n"
             "{\n"
             '  "suggested_action": "accept",\n'
             '  "action_params": {},\n'
-            '  "rationale": "This node groups several children well.",\n'
+            '  "rationale": "Groups several children under a clear abstraction.",\n'
             '  "confidence": 0.9\n'
             "}"
         ),

@@ -10,6 +10,29 @@ from app.services.ai_scoring import score_candidate
 from app.services.ontology_context import get_context_by_label, format_context, get_all_contexts_by_label
 
 
+# ---------------------------------------------------------------------------
+# Reviewer-principle injection. main.py owns the PRINCIPLES store, so it
+# installs a provider here at import time (avoids a circular import); the
+# duplicate/virtual detectors then pass the relevant principles into
+# score_candidate so suggestions follow team conventions.
+# ---------------------------------------------------------------------------
+_PRINCIPLES_PROVIDER = None
+
+
+def set_principles_provider(fn) -> None:
+    global _PRINCIPLES_PROVIDER
+    _PRINCIPLES_PROVIDER = fn
+
+
+def _principles_text(edit_type: str) -> str:
+    if _PRINCIPLES_PROVIDER is None:
+        return ""
+    try:
+        return _PRINCIPLES_PROVIDER(edit_type) or ""
+    except Exception:
+        return ""
+
+
 @dataclass
 class FlatNode:
     id: str
@@ -178,6 +201,7 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
             cache_key=f"duplicate::{label_key}",
             candidate_text=candidate_text,
             fallback=fallback,
+            principles_text=_principles_text("duplicate"),
         )
 
         suggestions.append(
@@ -249,22 +273,27 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
         "confidence": confidence,
     }
 
-    ctx = get_context_by_label(node.label)
-    if ctx:
-        candidate_text = format_context(ctx)
-    else:
-        candidate_text = (
-            f"Label: {node.label}\n"
-            f"Synset: {node.code or 'none (virtual/abstract node)'}\n"
-            f"Path: {' → '.join(node.path)}\n"
-            f"Number of children: {node.children_count}"
-        )
+    # Build a per-node data block from the node's OWN fields. (We do NOT use
+    # get_context_by_label here: virtual labels like "[virtual] shape" rarely
+    # match WordNet, and when a label does match it is label-ambiguous.) Giving
+    # the model concrete signals — how many children it groups, whether the
+    # label is generic, whether it has a synset — lets it actually recommend
+    # rename/delete instead of defaulting every virtual node to "accept".
+    candidate_text = (
+        f"Label: {node.label}\n"
+        f"Synset: {node.code or 'none (virtual grouping node)'}\n"
+        f"Ontology path: {' → '.join(node.path)}\n"
+        f"Parent: {node.parent_label or '(root)'}\n"
+        f"Number of children it groups: {node.children_count}\n"
+        f"Label is generic/vague: {'yes' if normalized in vague_terms else 'no'}"
+    )
 
     scored = score_candidate(
         edit_type="virtual",
         cache_key=f"virtual::{node.id}",
         candidate_text=candidate_text,
         fallback=fallback,
+        principles_text=_principles_text("virtual"),
     )
 
     return {

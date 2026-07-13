@@ -22,6 +22,7 @@ from app.services.edit_patterns import (
     detect_all_edit_patterns,
     _rerun_with_current_prompt,
     get_node_pattern_context,
+    set_principles_provider,
 )
 
 from app.schemas import (
@@ -182,6 +183,30 @@ PRINCIPLES: List[Dict[str, Any]] = [
         "category": "all",
     },
 ]
+
+
+def _principles_text_for(edit_type: str) -> str:
+    """Format the reviewer principles relevant to one edit type (its own
+    category plus 'all') for injection into the LLM prompt. Used by every
+    detector so suggestions follow team conventions."""
+    keys = {edit_type, "all"}
+    if edit_type in ("multiple_inheritance", "inheritance"):
+        keys |= {"multiple_inheritance", "inheritance"}
+    lines = []
+    for p in PRINCIPLES:
+        cat = (p.get("category") or "all").strip().lower()
+        if cat in keys:
+            title = (p.get("title") or "").strip()
+            body = (p.get("body") or "").strip()
+            if title and body:
+                lines.append(f"- {title}: {body}")
+            elif title or body:
+                lines.append(f"- {title or body}")
+    return "\n".join(lines)
+
+
+# Let the duplicate/virtual detectors (in edit_patterns) reach the principles.
+set_principles_provider(_principles_text_for)
 
 
 def now_iso() -> str:
@@ -393,6 +418,14 @@ def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
             }
             if not (resolved_keys & allowed):
                 merge_target = None  # target is outside the candidate set
+        # For a duplicate merge, the merged node naturally lives under the kept
+        # node's OWN existing parent. If the LLM's target_parent didn't resolve
+        # (common when two nodes share a synset), derive it from merge_target's
+        # path instead of suppressing the whole merge into an empty rename.
+        if candidate_nodes and merge_target is not None and target_parent is None:
+            mt_path = merge_target.get("path") or []
+            if len(mt_path) >= 2:
+                target_parent = _resolve_existing_node_ref(mt_path[-2])
         if merge_target is None or target_parent is None:
             result["suggested_action"] = "rename"
             result["action_params"] = {"renames": []}
@@ -406,6 +439,30 @@ def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
         params["merge_into_label"] = merge_target["label"]
         params["target_parent"] = target_parent["id"]
         params["target_parent_label"] = target_parent["label"]
+
+    if action == "rename":
+        # #5 safety net: a rename must NOT target a label that already belongs
+        # to another existing node (that situation is a merge, not a rename).
+        # The prompts forbid it; this flags any that slip through.
+        index = _ontology_reference_index()
+        own_ids = {str(n.get("id") or "").strip().lower() for n in (result.get("nodes") or [])}
+        proposed = []
+        if isinstance(params.get("renames"), list):
+            proposed = [str(r.get("new_label") or "") for r in params["renames"] if isinstance(r, dict)]
+        elif params.get("new_label"):
+            proposed = [str(params.get("new_label") or "")]
+        clashes = []
+        for new_label in proposed:
+            matches = index["by_label"].get(_norm_pattern_label(new_label), [])
+            # a clash only counts if it hits a DIFFERENT node than the ones being renamed
+            if any(str(m.get("id") or "").strip().lower() not in own_ids for m in matches):
+                clashes.append(new_label)
+        if clashes:
+            result["validation_warning"] = (
+                "Proposed new label(s) already exist as other nodes: "
+                f"{', '.join(clashes)}. If they are the same concept this should be a merge, "
+                "not a rename; otherwise choose a more specific label."
+            )
 
     result["action_params"] = params
     return result
@@ -887,6 +944,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
                 f"Appears under these paths:\n{_paths}"
             ),
             fallback=_inh_fb,
+            principles_text=_principles_text_for("multiple_inheritance"),
         )
         suggestions.append(
             _validate_suggestion_action({
@@ -977,6 +1035,7 @@ def _misplaced_suggestion_for_row(row: Dict[str, Any]) -> Optional[Dict[str, Any
         ),
         fallback=_mis_fb,
         model=MISPLACED_MODEL,
+        principles_text=_principles_text_for("misplaced"),
     )
 
     _mis_scored = _validate_suggestion_action(_mis_scored)
@@ -1071,6 +1130,7 @@ def _naming_suggestion_for_row(row: Dict[str, Any]) -> Dict[str, Any]:
             f"Path: {row.get('path_string','')}"
         ),
         fallback=_nam_fb,
+        principles_text=_principles_text_for("naming"),
     )
     return {
         "id": f"naming::{row['id']}",
