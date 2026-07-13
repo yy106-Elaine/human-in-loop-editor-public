@@ -2464,8 +2464,11 @@ def admin_reset(body: ResetRequest):
         "global_majority": "approve", "decision_counts": {},
     })
 
-    # Keep the 2 seeded principles, drop the human-added ones.
-    seeded = [p for p in PRINCIPLES if p.get("source") == "initial"]
+    # Keep the seeded principles, drop the human-added ones.
+    # (Seeds are hard-coded with source == "seed"; manual ones with "manual".
+    # The previous filter checked "initial", which matched nothing and wiped
+    # the seeds too until the next process restart re-seeded them.)
+    seeded = [p for p in PRINCIPLES if p.get("source") == "seed"]
     PRINCIPLES.clear()
     PRINCIPLES.extend(seeded)
 
@@ -2480,3 +2483,97 @@ def admin_reset(body: ResetRequest):
                 print(f"[main] could not clear {table}: {e}")
 
     return {"ok": True, "scope": "study", "message": "Full study state reset."}
+
+
+# ---------------------------------------------------------------------------
+# Between-studies session handling (per Alice's spec):
+#   - SAVE what a participant did (their decisions + any principles they added)
+#   - CLEAR only user actions + human-added principles
+#   - PRESERVE seed principles AND the AI suggestions/scores cache (the
+#     expensive one-time scan must NOT be wiped between participants)
+# This is deliberately NOT /admin/reset, which also clears _CACHE / ai_scores.
+# ---------------------------------------------------------------------------
+
+def _human_added_principles() -> List[Dict[str, Any]]:
+    return [p for p in PRINCIPLES if p.get("source") != "seed"]
+
+
+@app.get("/admin/export-session")
+def export_session():
+    """Return the current participant's work as JSON so it can be archived
+    before clearing. Captures user decisions + any principles they added.
+    Does NOT include AI scores/suggestions (those are shared and constant
+    across studies)."""
+    return {
+        "ok": True,
+        "exported_at": now_iso(),
+        "counts": {
+            "decisions": len(PATTERN_DECISIONS),
+            "added_principles": len(_human_added_principles()),
+            "conflicts": len(CONFLICTS),
+        },
+        "decisions": PATTERN_DECISIONS,
+        "added_principles": _human_added_principles(),
+        "conflicts": CONFLICTS,
+    }
+
+
+@app.post("/admin/clear-session")
+def clear_session(body: ResetRequest):
+    """Clear ONLY user actions + human-added principles for the next
+    participant. PRESERVES seed principles and the AI scores/suggestions
+    cache (so the one-time misplacement scan is never re-run between
+    studies). Export first via GET /admin/export-session if you want a copy."""
+    if not body.is_admin:
+        raise HTTPException(status_code=403, detail="Only a facilitator/admin can clear session state")
+
+    before = {
+        "decisions": len(PATTERN_DECISIONS),
+        "added_principles": len(_human_added_principles()),
+        "cached_ai_scores": len(_CACHE),
+        "seed_principles": len([p for p in PRINCIPLES if p.get("source") == "seed"]),
+    }
+
+    sb = _get_supabase()
+
+    # 1. User actions (in-memory) — cleared. AI scores (_CACHE) are NOT touched.
+    PATTERN_DECISIONS.clear()
+    CONFLICTS.clear()
+    AI_SUGGESTION_STORE.clear()
+    AUTO_REVIEW_ITEMS.clear()
+    ACTION_LOG.clear()
+    _reset_tree_statuses(ONTOLOGY_TREE)     # node colors back to none
+    LEARNING_MODEL.update({
+        "trained_at": None, "examples": 0, "rules": {},
+        "global_majority": "approve", "decision_counts": {},
+    })
+
+    # 2. Human-added principles — dropped; seeds kept.
+    seeded = [p for p in PRINCIPLES if p.get("source") == "seed"]
+    PRINCIPLES.clear()
+    PRINCIPLES.extend(seeded)
+
+    # 3. Supabase — clear user-action tables only. Crucially, ai_scores is
+    #    left ALONE so the scan survives.
+    if sb:
+        for table, col in (("pattern_decisions", "id"),
+                           ("node_status", "node_id"),
+                           ("action_log", "node_id")):
+            try:
+                sb.table(table).delete().neq(col, "__never__").execute()
+            except Exception as e:
+                print(f"[main] clear-session: could not clear {table}: {e}")
+
+    return {
+        "ok": True,
+        "message": "Session cleared. User actions + added principles removed; "
+                   "seed principles and AI suggestions preserved.",
+        "cleared": {
+            "decisions": before["decisions"],
+            "added_principles": before["added_principles"],
+        },
+        "preserved": {
+            "seed_principles": before["seed_principles"],
+            "cached_ai_scores": before["cached_ai_scores"],
+        },
+    }
