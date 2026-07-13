@@ -320,9 +320,29 @@ export function OntologyTree({
     return result.join(" → ");
   };
 
+  // Find which subontology (tab) a node id belongs to.
+  const subontologyOf = (nodeId: string): string | null => {
+    const inTree = (n: OntologyNode): boolean => {
+      if (n.id === nodeId) return true;
+      return (n.children ?? []).some(inTree);
+    };
+    for (const s of subontologies) {
+      const r = ontology[s.id];
+      if (r && inTree(r)) return s.id;
+    }
+    return null;
+  };
+
   const handleSelect = (node: OntologyNode, e: React.MouseEvent) => {
     setSelectedId(node.id);
     onNodeSelect(node.id);
+
+    // If the click came from a global-search result in another subontology,
+    // switch to that subontology so the node stays visible after clearing.
+    if (searching) {
+      const sub = subontologyOf(node.id);
+      if (sub && sub !== active) setActive(sub);
+    }
 
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setPopup({
@@ -464,7 +484,7 @@ export function OntologyTree({
         </div>
       </div>
 
-      <div className="p-2 flex-1 min-h-0 overflow-y-auto">
+      <div className="p-2 flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain">
         {loading ? (
           <div className="text-xs text-gray-400 p-4">Loading…</div>
         ) : error ? (
@@ -495,9 +515,8 @@ export function OntologyTree({
         ) : (
           <div className="text-xs text-gray-400 p-4">No matches.</div>
         )}
-      </div>
 
-      <div className="p-4 border-t border-gray-200 shrink-0">
+        <div className="mt-4 pt-4 border-t border-gray-200">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-semibold text-gray-700">Error type highlights</p>
           <button
@@ -533,6 +552,7 @@ export function OntologyTree({
               <span>{counts[type]}</span>
             </button>
           ))}
+        </div>
         </div>
       </div>
 

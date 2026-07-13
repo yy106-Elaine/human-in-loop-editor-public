@@ -65,91 +65,80 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
         "label": "Virtual Node Handling",
         "system": (
             "You are auditing a noun taxonomy for an ontology engineering project. "
-            "A '[virtual]' node is an abstract grouping node inserted to organize "
-            "children, not a real WordNet concept.\n\n"
-            "Decide in TWO steps.\n\n"
-            "STEP 1 — Is this node NECESSARY? This is the main question. Judge by "
-            "MEANING, not by the number of children. Default to KEEPING the "
-            "existing grouping — respect the structure that is already there.\n"
-            "- keep: the node represents a MEANINGFUL category, sense, or "
-            "dimension (e.g. '[virtual] performing_arts', '[virtual] "
-            "kitchen_utensil'). Keep it even if it currently has only 1-2 "
-            "children — a small but meaningful class is still worth keeping, and "
-            "it may gain children later.\n"
-            "- delete: ONLY when the node is a REDUNDANT intermediate layer — "
-            "removing it and attaching its children directly to its parent would "
-            "lose NO meaningful classification (the node adds no distinction its "
-            "parent doesn't already give). A low child count alone is NOT a reason "
-            "to delete; a node with few children can still be a meaningful class.\n"
-            "Do not delete a node just because it groups only a couple of "
-            "children — ask whether the category itself is meaningful.\n\n"
-            "STEP 2 — ONLY for nodes you decided to KEEP: does the label need "
-            "cleanup, or is this really the same as an existing real node?\n"
-            "- accept: the label is already clear; keep it as-is. NOTE: the "
-            "'[virtual]' marker itself is normal and expected — do NOT rename a "
-            "node just to remove '[virtual]' when the rest of the label is fine "
-            "(e.g. '[virtual] thinking' is fine → accept).\n"
-            "- rename: the node is worth keeping BUT its label is genuinely hard "
-            "to read — vague/generic ('group', 'unit') or machine-generated "
-            "(underscores, joiner artifacts like '_as_' / '_of_'). Give a clearer "
-            "grouping label. The new_label MUST STILL be a virtual grouping name "
-            "and MUST keep the '[virtual]' prefix (e.g. '[virtual] amorphous_shape' "
-            "→ '[virtual] shapeless form'). Renaming does NOT turn it into a real "
-            "concept. Rename is SECONDARY — never rename a node you would delete.\n"
-            "- merge: this virtual node is really the SAME as an existing REAL "
-            "node elsewhere in the taxonomy (a node with a genuine synset). Merge "
-            "the virtual node into that real node so its children move under it. "
-            "The merge target MUST be a real, existing node — never invent one.\n\n"
+            "A '[virtual]' node is an abstract grouping node inserted between a "
+            "parent and its children, not a real WordNet concept.\n\n"
+            "THE CORE TEST: imagine removing THIS layer from the path and attaching "
+            "its children directly to its parent. Does that lose any meaningful "
+            "classification?\n"
+            "- delete: removing this layer loses NOTHING meaningful — the node is "
+            "redundant with its parent or its child (their meanings are essentially "
+            "the same, or the node adds no distinction the parent doesn't already "
+            "give). Example: parent 'decoration' → '[virtual] adornment' → child "
+            "'trimming'. 'decoration' and 'adornment' mean essentially the same "
+            "thing, so 'decoration' can connect straight to 'trimming' — delete the "
+            "layer.\n"
+            "- accept (keep as is): this layer is a MEANINGFUL bridge between the "
+            "parent and the child — it narrows the parent into a real subcategory "
+            "that the child belongs to, so removing it would lose that distinction. "
+            "Example: parent 'device' → '[virtual] airfoil' → child 'spoiler'. "
+            "'airfoil' meaningfully narrows 'device' (a spoiler IS a kind of "
+            "airfoil, which is a kind of device), so keep it.\n\n"
+            "Judge by MEANING only. The number of children is NOT a factor — a "
+            "layer with one child can still be a meaningful bridge, and a layer "
+            "with many children can still be redundant. Do NOT use child count as "
+            "a reason.\n\n"
+            "delete and accept are the two main actions. Two minor actions:\n"
+            "- rename: use ONLY when the node is worth keeping AND its label is "
+            "genuinely unclear or imprecise IN MEANING, and a clearer word would "
+            "help. Do NOT rename for formatting reasons — the '[virtual]' prefix, "
+            "underscores, and capitalization are all fine and must be left alone. "
+            "If the only issue is format, choose accept, not rename.\n"
+            "- merge: only in the rare case that this virtual node is truly the "
+            "same as a real existing node ELSEWHERE in the taxonomy (not its own "
+            "parent or child on the same path — that case is delete). Do not reach "
+            "for merge; prefer delete or accept.\n\n"
             "Return STRICT JSON only, no markdown, no comments.\n\n"
             "The JSON MUST have these keys: suggested_action, action_params, "
             "rationale, confidence.\n\n"
             "action_params is a REQUIRED object:\n"
-            "- If suggested_action is \"rename\": action_params MUST contain "
-            "\"new_label\", a concrete clearer label that KEEPS the '[virtual]' "
-            "prefix, never empty. The new_label MUST NOT be the label of another "
-            "existing node.\n"
-            "- If suggested_action is \"merge\": action_params MUST contain "
-            "\"merge_into\" set to the synset or node_id of the real existing node "
-            "to merge into (never invented).\n"
-            "- If suggested_action is \"accept\" or \"delete\": use an empty "
-            "object {}.\n\n"
+            "- rename: MUST contain \"new_label\" (a clearer label; keep the "
+            "'[virtual]' prefix), never empty, and never equal to another existing "
+            "node's label.\n"
+            "- merge: MUST contain \"merge_into\" set to the synset or node_id of a "
+            "real existing node (never invented).\n"
+            "- accept or delete: use an empty object {}.\n\n"
             "Follow any provided review principles.\n\n"
-            "Give a short rationale a non-expert reviewer can understand — cite "
-            "the concrete signal (e.g. 'only 1 child, so it can be flattened', or "
-            "'kept for its 5 children but \"amorphous_shape\" is machine-generated'). "
-            "Return calibrated confidence.\n\n"
+            "Give a short rationale a non-expert reviewer can understand, phrased "
+            "around the core test — e.g. 'parent X and this layer mean the same "
+            "thing, so it can be flattened' or 'this layer meaningfully narrows X "
+            "into Y, so keep it'. Do NOT cite the number of children. Return "
+            "calibrated confidence.\n\n"
             "Example for delete (redundant layer):\n"
             "{\n"
             '  "suggested_action": "delete",\n'
             '  "action_params": {},\n'
-            '  "rationale": "This layer adds no distinction its parent does not already give; its children can attach directly to the parent with no loss.",\n'
-            '  "confidence": 0.8\n'
+            '  "rationale": "The parent \\"decoration\\" and this layer \\"adornment\\" mean essentially the same thing, so the child can attach directly to the parent with no loss.",\n'
+            '  "confidence": 0.82\n'
             "}\n\n"
-            "Example for rename (kept, but messy label — stays virtual):\n"
-            "{\n"
-            '  "suggested_action": "rename",\n'
-            '  "action_params": {"new_label": "[virtual] cutting tool"},\n'
-            '  "rationale": "Groups 4 children well, but \\"edge_tool\\" is machine-generated.",\n'
-            '  "confidence": 0.78\n'
-            "}\n\n"
-            "Example for merge (same as a real node):\n"
-            "{\n"
-            '  "suggested_action": "merge",\n'
-            '  "action_params": {"merge_into": "tool.n.01"},\n'
-            '  "rationale": "This virtual grouping duplicates the real node \\"tool\\"; merge its children under it.",\n'
-            '  "confidence": 0.7\n'
-            "}\n\n"
-            "Example for accept:\n"
+            "Example for accept / keep as is (meaningful bridge):\n"
             "{\n"
             '  "suggested_action": "accept",\n'
             '  "action_params": {},\n'
-            '  "rationale": "Groups several children under a clear abstraction.",\n'
-            '  "confidence": 0.9\n'
+            '  "rationale": "This layer meaningfully narrows \\"device\\" into the airfoil subcategory that the child belongs to; removing it would lose that distinction.",\n'
+            '  "confidence": 0.85\n'
+            "}\n\n"
+            "Example for rename (kept, meaning unclear — stays virtual):\n"
+            "{\n"
+            '  "suggested_action": "rename",\n'
+            '  "action_params": {"new_label": "[virtual] cutting tool"},\n'
+            '  "rationale": "A useful bridge, but the word is imprecise; \\"cutting tool\\" states the category more clearly.",\n'
+            '  "confidence": 0.7\n'
             "}"
         ),
         "user": (
             "## Candidate virtual node\n{candidate}\n\n"
-            "Analyze this node and return your decision as STRICT JSON."
+            "Apply the core test (would removing this layer lose meaningful "
+            "classification?) and return your decision as STRICT JSON."
         ),
     },
     "misplaced": {

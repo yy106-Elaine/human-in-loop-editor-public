@@ -92,6 +92,31 @@ def flatten_ontology() -> List[FlatNode]:
     return flat
 
 
+def _child_labels_of(node_id: str, limit: int = 8) -> List[str]:
+    """Return the direct children labels of a node (by id) from ONTOLOGY_TREE,
+    so the virtual-node prompt can apply the flatten test (does this layer
+    meaningfully bridge its parent to these children?)."""
+    found: List[str] = []
+
+    def walk(nodes: List[Any]) -> bool:
+        for n in nodes:
+            if getattr(n, "id", "") == node_id:
+                for c in (getattr(n, "children", []) or [])[:limit]:
+                    lbl = getattr(c, "label", "")
+                    if lbl:
+                        found.append(lbl)
+                return True
+            if walk(getattr(n, "children", []) or []):
+                return True
+        return False
+
+    try:
+        walk(ONTOLOGY_TREE)
+    except Exception:
+        pass
+    return found
+
+
 def _norm_label(label: str) -> str:
     return label.replace("_", " ").replace("-", " ").replace("[virtual]", "").strip().lower()
 
@@ -274,30 +299,22 @@ def _virtual_suggestion(node: FlatNode) -> Dict[str, Any]:
         "confidence": confidence,
     }
 
-    # Detect a machine-generated / messy label that would need cleanup IF the
-    # node is worth keeping: underscores, an "[virtual]" marker, a numbering
-    # prefix ("1. foo"), or joiner artifacts like "_as_" / "_of_".
-    _raw = str(node.label or "")
-    _machine_label = bool(
-        "_" in _raw
-        or "[virtual]" in _raw.lower()
-        or re.match(r"^\s*\d+[\.\)]", _raw)
-    )
-
-    # Build a per-node data block from the node's OWN fields. (We do NOT use
-    # get_context_by_label here: virtual labels like "[virtual] shape" rarely
-    # match WordNet, and when a label does match it is label-ambiguous.) Giving
-    # the model concrete signals — how many children it groups, whether the
-    # label is generic or machine-generated, whether it has a synset — lets it
-    # recommend delete/rename instead of defaulting every virtual node to accept.
+    # Give the model what the flatten test needs: the PARENT above this layer
+    # and the CHILDREN below it, so it can judge whether this layer meaningfully
+    # bridges parent -> children or is redundant with either. Child count and
+    # label formatting are intentionally NOT emphasized (format is not a reason
+    # to rename, and count is not a reason to delete).
+    _children = _child_labels_of(node.id)
+    _children_str = ", ".join(_children) if _children else "(none loaded)"
     candidate_text = (
         f"Label: {node.label}\n"
         f"Synset: {node.code or 'none (virtual grouping node)'}\n"
-        f"Ontology path: {' → '.join(node.path)}\n"
-        f"Parent: {node.parent_label or '(root)'}\n"
-        f"Number of children it groups: {node.children_count}\n"
-        f"Label is generic/vague: {'yes' if normalized in vague_terms else 'no'}\n"
-        f"Label looks machine-generated (needs cleanup if kept): {'yes' if _machine_label else 'no'}"
+        f"Full path (ancestors): {' → '.join(node.path)}\n"
+        f"Parent (the layer directly above): {node.parent_label or '(root)'}\n"
+        f"Children (the layer directly below): {_children_str}\n"
+        "Flatten test: would attaching these children directly to the parent "
+        "lose any meaningful classification? If no -> delete; if yes (this layer "
+        "is a meaningful subcategory) -> accept."
     )
 
     scored = score_candidate(
