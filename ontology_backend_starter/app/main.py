@@ -395,6 +395,53 @@ def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
             return result
         params[field] = resolved["id"]
         params[f"{field}_label"] = resolved["label"]
+        params[f"{field}_path"] = resolved.get("path_string", resolved["label"])
+
+    if action == "delete" and result.get("pattern_type") == "inheritance":
+        # A multiple-inheritance correction removes ONE invalid parent edge,
+        # never the concept and never every parent. There is intentionally no
+        # two-parent cap: a concept may have 2, 3, or more legitimate parents.
+        nodes = result.get("nodes") or []
+        parent_refs = []
+        for node in nodes:
+            parent_label = str(node.get("parent_label") or "").strip()
+            parent_path = str(node.get("path") or "").strip()
+            ref = parent_path or parent_label
+            if ref and ref not in parent_refs:
+                parent_refs.append(ref)
+
+        raw_remove = params.get("remove_parents")
+        removals = raw_remove if isinstance(raw_remove, list) else []
+        removals = [str(value).strip() for value in removals if str(value).strip()]
+
+        if len(parent_refs) < 2 or not removals:
+            result["suggested_action"] = "accept"
+            result["action_params"] = {}
+            result["rationale"] = (
+                f'{result.get("rationale", "")} A parent edge can only be detached '
+                "when the concept has at least two current placements and one specific "
+                "invalid parent is identified."
+            ).strip()
+            result["validation_warning"] = (
+                "Unsafe multiple-inheritance deletion was suppressed."
+            )
+            return result
+
+        # Keep only one proposed edge removal. This guarantees at least one
+        # placement remains even when the concept has exactly two parents.
+        if len(removals) > 1:
+            result["rationale"] = (
+                f'{result.get("rationale", "")} Only the first invalid parent edge '
+                "is proposed for removal in this review; the remaining placements "
+                "stay intact and can be reviewed separately."
+            ).strip()
+            result["validation_warning"] = (
+                "The LLM proposed multiple detachments; reduced to one parent edge."
+            )
+
+        params["remove_parents"] = [removals[0]]
+        params["current_parent_count"] = len(parent_refs)
+        params["remaining_parent_count"] = max(1, len(parent_refs) - 1)
 
     if action == "merge":
         merge_target = _resolve_existing_node_ref(params.get("merge_into"))
@@ -444,6 +491,7 @@ def _validate_suggestion_action(suggestion: Dict[str, Any]) -> Dict[str, Any]:
         params["merge_into_label"] = merge_target["label"]
         params["target_parent"] = target_parent["id"]
         params["target_parent_label"] = target_parent["label"]
+        params["target_parent_path"] = target_parent.get("path_string", target_parent["label"])
 
     if action == "rename":
         # #5 safety net: a rename must NOT target a label that already belongs
@@ -927,7 +975,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
 
         _paths = "\n".join(
             f"- {r['label']} ({r.get('code') or 'no synset'}): {r.get('path_string','')}"
-            for r in matches[:6]
+            for r in matches
         )
         _inh_fb = {
             "suggested_action": "consider_multiple_inheritance",
@@ -970,7 +1018,7 @@ def _detect_inheritance_patterns() -> Dict[str, Any]:
                         "parent_label": row["path"][-2] if len(row.get("path", [])) >= 2 else None,
                         "path": row.get("path_string", ""),
                     }
-                    for row in matches[:6]
+                    for row in matches
                 ],
                 "synsets": synsets,
             })
