@@ -393,17 +393,47 @@ export function OntologyTree({
       return next;
     });
   }, [root]);
-  const { tree, expand } = useMemo(
-    () => root
-      ? filterTree(root, query, errorHighlights, activeErrorFilter ?? null)
-      : { tree: null, expand: new Set<string>() },
-    [root, query, errorHighlights, activeErrorFilter]
-  );
+
+  const searching = query.trim().length > 0;
+
+  // GLOBAL search: when there is a query, search every subontology (not just
+  // the active tab) and show all matches grouped by subontology. With no query,
+  // show only the active subontology as before.
+  const results = useMemo(() => {
+    const out: {
+      sub: { id: string; label: string };
+      tree: OntologyNode;
+      expand: Set<string>;
+    }[] = [];
+    if (searching) {
+      for (const s of subontologies) {
+        const r = ontology[s.id];
+        if (!r) continue;
+        const { tree, expand } = filterTree(r, query, errorHighlights, activeErrorFilter ?? null);
+        if (tree && tree.children && tree.children.length) {
+          out.push({ sub: s, tree, expand });
+        }
+      }
+      return out;
+    }
+    if (!root) return out;
+    const { tree, expand } = filterTree(root, query, errorHighlights, activeErrorFilter ?? null);
+    const activeSub = subontologies.find((s) => s.id === active) ?? { id: active, label: active };
+    if (tree) out.push({ sub: activeSub, tree, expand });
+    return out;
+  }, [searching, query, subontologies, ontology, root, active, errorHighlights, activeErrorFilter]);
+
+  const expand = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of results) for (const id of r.expand) set.add(id);
+    return set;
+  }, [results]);
+
   const filtering = query.trim().length > 0 || !!activeErrorFilter;
 
   return (
-    <div className="h-full bg-white border-r border-gray-200 overflow-y-auto flex flex-col">
-      <div className="p-4 border-b border-gray-200">
+    <div className="h-full bg-white border-r border-gray-200 overflow-hidden flex flex-col">
+      <div className="p-4 border-b border-gray-200 shrink-0">
         <h2 className="text-sm font-semibold text-gray-900 mb-3">Ontology Structure</h2>
         <div className="flex gap-1 mb-3 overflow-x-auto">
           {subontologies.map((s) => (
@@ -428,37 +458,46 @@ export function OntologyTree({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search this subontology…"
+            placeholder="Search all ontologies…"
             className="w-full pl-7 pr-2 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400"
           />
         </div>
       </div>
 
-      <div className="p-2 flex-1">
+      <div className="p-2 flex-1 min-h-0 overflow-y-auto">
         {loading ? (
           <div className="text-xs text-gray-400 p-4">Loading…</div>
         ) : error ? (
           <div className="text-xs text-red-500 p-4">Failed to load: {error}</div>
-        ) : tree && tree.children ? (
-          tree.children.map((node) => (
-            <TreeNode
-              key={node.id}
-              node={node}
-              level={0}
-              selectedId={selectedId}
-              onSelect={handleSelect}
-              expandedIds={filtering ? expand : expandedIds}
-              onToggle={toggleExpand}
-              highlightIds={highlightIds}
-              errorHighlights={errorHighlights}
-            />
+        ) : results.length > 0 ? (
+          results.map(({ sub, tree }) => (
+            <div key={sub.id} className="mb-2">
+              {searching && (
+                <p className="px-2 pt-1 pb-0.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+                  {sub.label}
+                </p>
+              )}
+              {tree.children?.map((node) => (
+                <TreeNode
+                  key={node.id}
+                  node={node}
+                  level={0}
+                  selectedId={selectedId}
+                  onSelect={handleSelect}
+                  expandedIds={filtering ? expand : expandedIds}
+                  onToggle={toggleExpand}
+                  highlightIds={highlightIds}
+                  errorHighlights={errorHighlights}
+                />
+              ))}
+            </div>
           ))
         ) : (
           <div className="text-xs text-gray-400 p-4">No matches.</div>
         )}
       </div>
 
-      <div className="p-4 border-t border-gray-200">
+      <div className="p-4 border-t border-gray-200 shrink-0">
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-semibold text-gray-700">Error type highlights</p>
           <button
