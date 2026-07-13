@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -127,19 +128,51 @@ def detect_duplicate_patterns() -> Dict[str, Any]:
                 "confidence": 0.75,
             }
 
-        # Build rich candidate text using semantic context (definitions, siblings)
-        # so the LLM can tell genuine duplicates from same-label-different-sense.
+        # Build candidate text with ONE block PER NODE, using each node's own
+        # synset (n.code) and its own ONTOLOGY path (n.path). Previously this
+        # used get_context_by_label(n.label), which returns the FIRST match for
+        # a label — so every same-label node got the *identical* block and the
+        # LLM concluded the distinct senses were "identical". We now match each
+        # node to the context whose synset (parsed from its title, e.g.
+        # "class (class.n.02)") equals n.code, and always show the node's real
+        # synset + ontology path so distinct senses are visibly distinct.
+        def _synset_of_title(title: str) -> str:
+            m = re.search(r"\(([^)]+)\)\s*$", title or "")
+            return m.group(1).strip().lower() if m else ""
+
+        ctx_by_synset: Dict[str, Dict[str, Any]] = {}
+        for c in ctxs:
+            syn = _synset_of_title(c.get("title", ""))
+            if syn:
+                ctx_by_synset[syn] = c
+
         blocks = []
-        for n in nodes:
-            ctx = get_context_by_label(n.label)
-            if ctx:
-                blocks.append(format_context(ctx))
-            else:
-                blocks.append(
-                    f'Label: {n.label}\nSynset: {n.code or "none"}\n'
-                    f'Path: {" → ".join(n.path)}\n(no extended context found)'
-                )
-        candidate_text = "\n\n---\n\n".join(blocks)
+        for i, n in enumerate(nodes, 1):
+            code = (n.code or "").strip()
+            c = ctx_by_synset.get(code.lower())
+            definition = (c.get("definition") if c else "") or "(none)"
+            synonyms = (c.get("synonyms") if c else "") or "(none)"
+            supersenses = (c.get("supersenses") if c else "") or "(none)"
+            blocks.append(
+                f"Candidate {i}:\n"
+                f"  node_id: {n.id}\n"
+                f"  Label: {n.label}\n"
+                f"  Synset: {code or 'none'}\n"
+                f"  Ontology path: {' → '.join(n.path)}\n"
+                f"  Parent: {n.parent_label or '(root)'}\n"
+                f"  Definition: {definition}\n"
+                f"  Synonyms: {synonyms}\n"
+                f"  Supersenses: {supersenses}"
+            )
+        candidate_text = (
+            f"These {len(nodes)} ontology nodes share the label "
+            f"'{nodes[0].label}'. They are the ONLY candidates. If you "
+            "recommend 'merge', the merge target MUST be one of the synsets/"
+            "node_ids listed below — never invent another node. Different "
+            "synsets or different ontology paths usually mean different senses "
+            "that should be kept separate and renamed, not merged.\n\n"
+            + "\n\n---\n\n".join(blocks)
+        )
         scored = score_candidate(
             edit_type="duplicate",
             cache_key=f"duplicate::{label_key}",
