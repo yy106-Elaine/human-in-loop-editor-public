@@ -99,9 +99,9 @@ function describeActionParams(params: unknown): string | null {
   if (!params || typeof params !== "object") return null;
   const p = params as Record<string, unknown>;
   if (Array.isArray(p.remove_parents) && p.remove_parents.length > 0) {
-    // Multiple inheritance "delete": show exactly which parent edge(s)
-    // to detach, e.g. "delete · detach from parent Give (...)"
-    return p.remove_parents.map((r) => String(r)).join("; ");
+    // Backend guarantees exactly one edge removal. Read only the first item
+    // defensively so stale cached results can never display "detach both".
+    return String(p.remove_parents[0]);
   }
   if (Array.isArray(p.renames) && p.renames.length > 0) {
     return p.renames
@@ -123,7 +123,13 @@ function describeActionParams(params: unknown): string | null {
     return `merge into ${p.merge_into}${parent}`;
   }
   if (typeof p.target_parent === "string" && p.target_parent) {
-    return `move under ${p.target_parent}`;
+    const destination =
+      typeof p.target_parent_path === "string" && p.target_parent_path
+        ? p.target_parent_path
+        : typeof p.target_parent_label === "string" && p.target_parent_label
+          ? p.target_parent_label
+          : p.target_parent;
+    return `move under ${destination}`;
   }
   if (typeof p.additional_parent === "string" && p.additional_parent) {
     return `also under ${p.additional_parent}`;
@@ -950,6 +956,19 @@ function SuggestionCard({
   // Prefer the locally re-run result for display.
   const shown = localSuggestion ?? suggestion;
   const colors = PATTERN_COLORS[shown.pattern_type ?? ""] ?? DEFAULT_COLOR;
+  const shownParams = (shown.action_params ?? {}) as Record<string, unknown>;
+  const proposedParentId =
+    shown.pattern_type === "misplaced" &&
+    shown.suggested_action === "place_elsewhere" &&
+    typeof shownParams.target_parent === "string"
+      ? shownParams.target_parent
+      : null;
+  const proposedParentPath =
+    typeof shownParams.target_parent_path === "string" && shownParams.target_parent_path
+      ? shownParams.target_parent_path
+      : typeof shownParams.target_parent_label === "string" && shownParams.target_parent_label
+        ? shownParams.target_parent_label
+        : proposedParentId;
 
   return (
     <div
@@ -1003,9 +1022,34 @@ function SuggestionCard({
         {shown.rationale}
       </p>
 
+      {proposedParentId && proposedParentPath && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onFocusNode?.([proposedParentId]);
+          }}
+          className="mt-3 w-full text-left rounded-lg border border-amber-200 bg-white/80 px-3 py-2 hover:bg-amber-50 transition-colors"
+          title="Jump to the proposed parent in the hierarchy"
+        >
+          <span className="block text-[11px] font-medium uppercase tracking-wider text-amber-700">
+            Proposed new placement
+          </span>
+          <span className="block mt-1 text-xs font-medium text-gray-800 whitespace-normal break-words">
+            {proposedParentPath}
+          </span>
+          <span className="block mt-1 text-[11px] text-gray-500">
+            Click to locate this parent in the hierarchy
+          </span>
+        </button>
+      )}
+
       {suggestion.nodes && suggestion.nodes.length > 0 && (
         <div className="mt-4 grid gap-2">
-          {suggestion.nodes.slice(0, 5).map((node) => (
+          {(shown.pattern_type === "inheritance"
+            ? suggestion.nodes
+            : suggestion.nodes.slice(0, 5)
+          ).map((node) => (
             <div
               key={node.id}
               className="rounded-lg bg-gray-50 border border-gray-200 px-3 py-2"
@@ -1018,7 +1062,7 @@ function SuggestionCard({
                   {node.code ?? "no synset"}
                 </span>
               </div>
-              {node.path && (
+              {node.path && shown.pattern_type !== "misplaced" && (
                 <p className="text-xs text-gray-500 mt-1 break-words">
                   {node.path}
                 </p>
@@ -1028,8 +1072,10 @@ function SuggestionCard({
         </div>
       )}
 
-      {suggestion.path && (
-        <p className="text-xs text-gray-500 mt-3 whitespace-normal break-words">{suggestion.path}</p>
+      {suggestion.path && shown.pattern_type !== "misplaced" && (
+        <p className="text-xs text-gray-500 mt-3 whitespace-normal break-words">
+          {suggestion.path}
+        </p>
       )}
 
       {decisions.length > 0 && (

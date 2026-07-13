@@ -182,55 +182,49 @@ _DEFAULT_PROMPTS: Dict[str, Dict[str, str]] = {
         "label": "Multiple Inheritance",
         "system": (
             "You are auditing a noun taxonomy for an ontology engineering project. "
-            "You are given ONE concept (a single WordNet synset) that appears in "
-            "MULTIPLE places in the taxonomy — i.e. it has more than one parent. "
-            "You see its label, synset, definition, and every path where it occurs.\n\n"
-            "Multiple inheritance is sometimes CORRECT: a concept can genuinely be "
-            "a subtype of two parents (e.g. 'tomato' under both fruit and "
-            "vegetable-as-food). It is INCORRECT when one of the placements is not "
-            "a true IS-A relation, or when the duplication is accidental.\n\n"
-            "Judge each occurrence by the DEFINITION: for every path, ask whether "
-            "the concept truly IS-A its parent there.\n\n"
-            "Decide ONE of:\n"
-            "- accept: keep the existing multiple-parent structure exactly as-is because "
-            "every listed placement is already a valid and distinct IS-A relation.\n"
-            "- delete: remove one or more existing parent edges because those placements "
-            "are not valid IS-A relations. The concept itself remains under its valid "
-            "parent(s). You MUST identify the parent edge(s) to detach.\n\n"
-            "IMPORTANT RULES:\n"
-            "- suggested_action MUST be EXACTLY \"accept\" or \"delete\". These "
-            "match the reviewer's action buttons. Never output meta-advice like "
-            "\"consider\" or \"review\" — deciding is your job.\n"
-            "- If \"delete\": action_params MUST contain \"remove_parents\", an "
-            "array naming each parent to detach from, each entry as "
-            "\"detach from parent <label> (<synset or path fragment>)\", keeping "
-            "the placement(s) whose IS-A relation the definition supports.\n"
-            "- If \"accept\": action_params is an empty object {}.\n"
-            "- rationale MUST cite the definition and explain, per placement, why "
-            "it is or isn't a valid IS-A relation.\n"
-            "- confidence: 0.85+ only when the definition clearly settles it; "
-            "0.6-0.85 for judgment calls; below 0.6 when evidence is thin.\n\n"
-            "Return STRICT JSON only, no markdown, no comments. Keys: "
-            "suggested_action, action_params, rationale, confidence.\n\n"
-            "Example (legitimate multiple inheritance):\n"
-            "{\n"
-            '  "suggested_action": "accept",\n'
-            '  "action_params": {},\n'
-            '  "rationale": "The definition supports both placements: it IS-A fruit botanically and IS-A vegetable in the food-preparation sense.",\n'
-            '  "confidence": 0.85\n'
-            "}\n\n"
-            "Example (one placement is wrong):\n"
+            "You are given ONE concept (one WordNet synset) that appears under "
+            "MULTIPLE parents. A concept may legitimately have two, three, or more "
+            "parents; there is no maximum of two. You see the definition and every "
+            "current hierarchy path.\n\n"
+            "Multiple inheritance is correct only when every direct parent is "
+            "genuinely distinct and the concept inherits useful properties from each. "
+            "It is incorrect when one placement is not a true IS-A relation or when "
+            "one parent is already an ancestor of another.\n\n"
+            "Judge every current placement by the DEFINITION. Decide ONE of:\n"
+            "- accept: keep all current parent edges exactly as-is because every "
+            "listed placement is a valid, distinct IS-A relation.\n"
+            "- delete: detach exactly ONE invalid direct-parent edge in this review. "
+            "The concept itself remains in the ontology and all other parent edges "
+            "remain unchanged.\n\n"
+            "CRITICAL SAFETY RULES:\n"
+            "- Never detach from every parent. A concept must retain at least one "
+            "placement in the ontology.\n"
+            "- Never return more than one parent in remove_parents. If several "
+            "placements appear questionable, choose the single clearest invalid "
+            "edge; the others can be reviewed separately.\n"
+            "- Do not assume there are only two parents. Evaluate all paths shown.\n"
+            "- suggested_action MUST be exactly \"accept\" or \"delete\".\n"
+            "- If \"delete\": action_params MUST contain \"remove_parents\" as "
+            "an array with EXACTLY ONE string identifying the direct parent edge to "
+            "detach, formatted as \"detach from parent <label> (<path>)\".\n"
+            "- If \"accept\": action_params must be {}.\n"
+            "- rationale must explain why the selected edge fails the IS-A test and "
+            "why at least one remaining placement is valid.\n\n"
+            "Return STRICT JSON only with keys suggested_action, action_params, "
+            "rationale, confidence.\n\n"
+            "Example:\n"
             "{\n"
             '  "suggested_action": "delete",\n'
-            '  "action_params": {"remove_parents": ["detach from parent Give (Transfer between actors > Provide > Give)"]},\n'
-            '  "rationale": "The definition describes a monetary award (a thing), which IS-A transferable object; the placement under the act of giving is not a valid IS-A relation.",\n'
-            '  "confidence": 0.75\n'
+            '  "action_params": {"remove_parents": ["detach from parent Physical Properties (Activities > Misclassified > Physical Properties)"]},\n'
+            '  "rationale": "The definition describes a transformation process, so the Activities placement remains valid; Physical Properties is not a valid IS-A parent.",\n'
+            '  "confidence": 0.84\n'
             "}"
         ),
         "user": (
-            "## Concept with multiple parents\n{candidate}\n\n"
-            "Is this multiple inheritance legitimate? If not, name which parent(s) "
-            "to detach from. Return STRICT JSON."
+            "## Concept with all current parent paths\n{candidate}\n\n"
+            "Evaluate every path. Either accept all current parents or identify "
+            "exactly one invalid direct-parent edge to detach while retaining at "
+            "least one valid placement. Return STRICT JSON."
         ),
     },
     "naming": {
