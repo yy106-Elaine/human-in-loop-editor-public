@@ -878,6 +878,10 @@ function SuggestionCard({
   const [actionKind, setActionKind] = useState<string | null>(null);
   const [actionField, setActionField] = useState("");
   const [mergeParent, setMergeParent] = useState("");
+  // Per-node rename map for duplicate cards with multiple nodes: node_id ->
+  // new label. An empty/absent entry means "keep this node as-is". Lets the
+  // reviewer rename only some of the duplicates instead of all together.
+  const [perNodeRenames, setPerNodeRenames] = useState<Record<string, string>>({});
   const [principleUpdate, setPrincipleUpdate] = useState("");
   const [linkPrincipleId, setLinkPrincipleId] = useState<string | null>(null);
   const [status, setStatus] = useState("");
@@ -893,6 +897,7 @@ function SuggestionCard({
   useEffect(() => {
     setLocalSuggestion(null);
     setWasRerun(false);
+    setPerNodeRenames({});
   }, [suggestion]);
 
   async function submit(decision: "approve" | "alter" | "reject") {
@@ -903,6 +908,16 @@ function SuggestionCard({
         actionKind === "merge" && mergeParent.trim()
           ? `${alteredAction} · under ${mergeParent.trim()}`
           : alteredAction;
+
+      // If the reviewer set per-node renames (duplicate rename), record them as
+      // a renames array so only the chosen nodes are renamed and the rest stay.
+      const reviewerRenames = Object.entries(perNodeRenames)
+        .filter(([, val]) => val.trim())
+        .map(([node_id, new_label]) => ({ node_id, new_label: new_label.trim() }));
+      const finalActionParams =
+        decision === "alter" && reviewerRenames.length > 0
+          ? { renames: reviewerRenames }
+          : suggestion.action_params ?? {};
 
       await decideEditPattern(suggestion.id, {
         decision,
@@ -915,7 +930,7 @@ function SuggestionCard({
         payload: {
           pattern_type: suggestion.pattern_type,
           suggested_action: suggestion.suggested_action,
-          action_params: suggestion.action_params ?? {},
+          action_params: finalActionParams,
           title: suggestion.title,
           merge_parent:
             actionKind === "merge" && mergeParent.trim()
@@ -931,6 +946,7 @@ function SuggestionCard({
       setActionKind(null);
       setActionField("");
       setMergeParent("");
+      setPerNodeRenames({});
       setPrincipleUpdate("");
       setLinkPrincipleId(null);
       await onDecision();
@@ -1155,6 +1171,7 @@ function SuggestionCard({
                       onClick={() => {
                         setActionKind(opt.kind);
                         setActionField("");
+                        setPerNodeRenames({});
                         setAlteredAction(opt.label);
                       }}
                       className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm border transition-colors ${
@@ -1194,6 +1211,51 @@ function SuggestionCard({
                     v.trim() ? `${selected.label} → ${v.trim()}` : selected.label
                   );
                 };
+
+                // Duplicate rename with MULTIPLE nodes: let the reviewer set a
+                // new label per node (blank = keep that one as-is), so they can
+                // rename just one and leave the other unchanged.
+                const dupNodes = suggestion.nodes ?? [];
+                const perNodeMode = actionKind === "rename" && dupNodes.length > 1;
+
+                if (perNodeMode) {
+                  const setOne = (id: string, v: string) => {
+                    const next = { ...perNodeRenames, [id]: v };
+                    if (!v.trim()) delete next[id];
+                    setPerNodeRenames(next);
+                    const summary = Object.entries(next)
+                      .filter(([, val]) => val.trim())
+                      .map(([nid, val]) => `${nid}: "${val.trim()}"`)
+                      .join("; ");
+                    setAlteredAction(summary ? `Rename ${summary}` : "Rename");
+                  };
+                  return (
+                    <div className="mt-3">
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-gray-500 mb-1">
+                        New label per node
+                      </label>
+                      <p className="text-[11px] text-gray-400 mb-2">
+                        Leave a field blank to keep that node unchanged. You can rename just one.
+                      </p>
+                      <div className="grid gap-2">
+                        {dupNodes.map((n) => (
+                          <div key={n.id} className="rounded-md border border-gray-200 px-2.5 py-2">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <span className="text-sm font-medium text-gray-800">{n.label}</span>
+                              <span className="text-xs text-gray-400">{n.code ?? "no synset"}</span>
+                            </div>
+                            <input
+                              value={perNodeRenames[n.id] ?? ""}
+                              onChange={(e) => setOne(n.id, e.target.value)}
+                              placeholder={`Keep "${n.label}" — or type a new label`}
+                              className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-gray-400"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                }
 
                 return (
                   <div className="mt-3">
@@ -1287,10 +1349,14 @@ function SuggestionCard({
             // value (rename -> new label, merge/add_parent/place_elsewhere -> ID)
             // it must be filled before the decision can be saved.
             const selectedAlter = ALTER_ACTIONS.find((a) => a.kind === actionKind);
+            // Per-node duplicate rename: require at least one node to be renamed.
+            const perNodeMode =
+              actionKind === "rename" && (suggestion.nodes?.length ?? 0) > 1;
+            const perNodeFilled = Object.values(perNodeRenames).some((v) => v.trim());
             const missingField =
               mode === "alter" &&
               Boolean(selectedAlter?.requiredField) &&
-              actionField.trim() === "";
+              (perNodeMode ? !perNodeFilled : actionField.trim() === "");
             // Merge also requires choosing which parent the merged node lands under.
             const missingMergeParent =
               mode === "alter" &&
